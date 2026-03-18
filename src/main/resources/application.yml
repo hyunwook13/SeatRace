@@ -1,0 +1,8 @@
+spring:
+  application:
+    name: SeatRace
+  datasource:
+    url: jdbc:postgresql://localhost:5432/seatrace
+    username: seatrace
+    password: seatrace
+    driver-class-name: org.postgresql.Driver
