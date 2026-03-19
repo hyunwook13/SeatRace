@@ -3,6 +3,17 @@ spring:
     name: SeatRace
   datasource:
     url: jdbc:postgresql://localhost:5432/seatrace
-    username: seatrace
-    password: seatrace
+    username: ${DB_NAME}
+    password: ${DB_PW}
     driver-class-name: org.postgresql.Driver
+
+server:
+  servlet:
+    session:
+      tracking-modes: cookie
+
+jwt:
+  secret: ${JWT_SECRET}
+  access-token-validity-in-ms: 3600000
+  refresh-token-validity-in-ms: 1209600000
+  issuer: "seat-race-server"
