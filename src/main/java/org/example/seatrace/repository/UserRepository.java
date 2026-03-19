@@ -1,4 +1,4 @@
-package org.example.seatrace.user;
+package org.example.seatrace.repository;
 
 import java.util.Optional;
 import org.example.seatrace.entity.User;

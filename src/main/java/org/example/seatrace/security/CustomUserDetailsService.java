@@ -1,7 +1,8 @@
-package org.example.seatrace.user;
+package org.example.seatrace.security;
 
 import lombok.RequiredArgsConstructor;
 import org.example.seatrace.entity.User;
+import org.example.seatrace.repository.UserRepository;
 import org.springframework.security.core.authority.SimpleGrantedAuthority;
 import org.springframework.security.core.userdetails.UserDetails;
 import org.springframework.security.core.userdetails.UserDetailsService;

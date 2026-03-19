@@ -2,11 +2,10 @@ package org.example.seatrace.service;
 
 import lombok.RequiredArgsConstructor;
 import org.example.seatrace.dto.SignupRequest;
-import org.example.seatrace.dto.UserDto;
 import org.example.seatrace.entity.User;
 import org.example.seatrace.entity.UserRole;
 import org.example.seatrace.entity.User.UserStatus;
-import org.example.seatrace.user.UserRepository;
+import org.example.seatrace.repository.UserRepository;
 import org.springframework.http.HttpStatus;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
