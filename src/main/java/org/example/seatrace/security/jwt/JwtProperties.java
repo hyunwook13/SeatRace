@@ -1,4 +1,4 @@
-package org.example.seatrace.security;
+package org.example.seatrace.security.jwt;
 
 import lombok.Getter;
 import lombok.Setter;
@@ -11,6 +11,7 @@ import org.springframework.stereotype.Component;
 @ConfigurationProperties(prefix = "jwt")
 class JwtProperties {
   private String secret;
-  private long expiration;
   private String issuer;
+  private long accessTokenValidityInMs;
+  private long refreshTokenValidityInMs;
 }

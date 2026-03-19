@@ -1,4 +1,4 @@
-package org.example.seatrace.security;
+package org.example.seatrace.security.jwt;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import jakarta.servlet.ServletException;
@@ -11,7 +11,6 @@ import lombok.RequiredArgsConstructor;
 import org.example.seatrace.dto.JwtDto;
 import org.example.seatrace.dto.UserDto;
 import org.example.seatrace.entity.User;
-import org.example.seatrace.security.jwt.JwtTokenProvider;
 import org.example.seatrace.user.UserRepository;
 import org.springframework.http.MediaType;
 import org.springframework.security.core.Authentication;
@@ -46,7 +45,6 @@ public class JwtLoginSuccessHandler implements AuthenticationSuccessHandler {
     refreshCookie.setMaxAge(60 * 60 * 24 * 14); // 2주
     response.addCookie(refreshCookie);
 
-    // 3. JSON 응답 작성
     response.setStatus(HttpServletResponse.SC_OK);
     response.setContentType(MediaType.APPLICATION_JSON_VALUE);
     response.setCharacterEncoding(StandardCharsets.UTF_8.name());
