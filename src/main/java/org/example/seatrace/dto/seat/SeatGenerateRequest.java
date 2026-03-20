@@ -1,4 +1,4 @@
-package org.example.seatrace.dto.venue;
+package org.example.seatrace.dto.seat;
 
 import jakarta.validation.constraints.Min;
 import jakarta.validation.constraints.NotBlank;

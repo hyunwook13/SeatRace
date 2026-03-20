@@ -1,4 +1,4 @@
-package org.example.seatrace.dto;
+package org.example.seatrace.dto.seat;
 
 import java.util.EnumMap;
 import java.util.List;

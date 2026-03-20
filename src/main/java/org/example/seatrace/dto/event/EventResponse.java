@@ -1,8 +1,8 @@
-package org.example.seatrace.dto.venue;
+package org.example.seatrace.dto.event;
 
 import lombok.Getter;
 import lombok.RequiredArgsConstructor;
-import org.example.seatrace.dto.EventSeatStats;
+import org.example.seatrace.dto.seat.EventSeatStats;
 import org.example.seatrace.entity.Event;
 
 @Getter
