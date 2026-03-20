@@ -1,4 +1,4 @@
-package org.example.seatrace.dto;
+package org.example.seatrace.dto.auth;
 
 import jakarta.validation.constraints.Email;
 import jakarta.validation.constraints.NotBlank;

@@ -1,8 +1,9 @@
-package org.example.seatrace.dto;
+package org.example.seatrace.dto.venue;
 
 import java.util.List;
 import lombok.Builder;
 import lombok.Getter;
+import org.example.seatrace.dto.SeatSummary;
 
 @Getter
 @Builder
