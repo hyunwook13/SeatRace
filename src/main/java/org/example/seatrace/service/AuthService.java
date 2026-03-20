@@ -1,7 +1,7 @@
 package org.example.seatrace.service;
 
 import lombok.RequiredArgsConstructor;
-import org.example.seatrace.dto.SignupRequest;
+import org.example.seatrace.dto.auth.SignupRequest;
 import org.example.seatrace.entity.User;
 import org.example.seatrace.entity.UserRole;
 import org.example.seatrace.entity.User.UserStatus;
