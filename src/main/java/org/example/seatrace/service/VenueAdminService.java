@@ -2,9 +2,9 @@ package org.example.seatrace.service;
 
 import java.util.List;
 import lombok.RequiredArgsConstructor;
-import org.example.seatrace.dto.venue.BulkSeatCreateResponse;
-import org.example.seatrace.dto.venue.SeatGenerateRequest;
-import org.example.seatrace.dto.SeatSummary;
+import org.example.seatrace.dto.seat.BulkSeatCreateResponse;
+import org.example.seatrace.dto.seat.SeatGenerateRequest;
+import org.example.seatrace.dto.seat.SeatSummary;
 import org.example.seatrace.dto.venue.VenueCreateRequest;
 import org.example.seatrace.dto.venue.VenueResponse;
 import org.example.seatrace.entity.Seat;

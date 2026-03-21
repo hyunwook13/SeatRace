@@ -3,16 +3,14 @@ package org.example.seatrace.controller;
 import jakarta.validation.Valid;
 import io.swagger.v3.oas.annotations.security.SecurityRequirement;
 import lombok.RequiredArgsConstructor;
-import org.apache.coyote.Response;
-import org.example.seatrace.dto.venue.EventCreateRequest;
-import org.example.seatrace.dto.venue.EventResponse;
+import org.example.seatrace.dto.event.EventCreateRequest;
+import org.example.seatrace.dto.event.EventResponse;
 import org.example.seatrace.service.EventAdminService;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
-import org.springframework.web.bind.annotation.ResponseStatus;
 import org.springframework.web.bind.annotation.RestController;
 
 @RestController

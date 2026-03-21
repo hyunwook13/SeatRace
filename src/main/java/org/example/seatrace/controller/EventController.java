@@ -2,8 +2,8 @@ package org.example.seatrace.controller;
 
 import java.util.List;
 import lombok.RequiredArgsConstructor;
-import org.example.seatrace.dto.EventSeatListResponse;
-import org.example.seatrace.dto.venue.EventResponse;
+import org.example.seatrace.dto.seat.EventSeatListResponse;
+import org.example.seatrace.dto.event.EventResponse;
 import org.example.seatrace.service.EventSeatService;
 import org.example.seatrace.service.EventService;
 import org.springframework.http.ResponseEntity;

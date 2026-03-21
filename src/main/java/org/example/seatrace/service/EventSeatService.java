@@ -2,7 +2,7 @@ package org.example.seatrace.service;
 
 import java.util.List;
 import lombok.RequiredArgsConstructor;
-import org.example.seatrace.dto.EventSeatSummary;
+import org.example.seatrace.dto.seat.EventSeatSummary;
 import org.example.seatrace.entity.Event;
 import org.example.seatrace.repository.EventRepository;
 import org.example.seatrace.repository.EventSeatRepository;
