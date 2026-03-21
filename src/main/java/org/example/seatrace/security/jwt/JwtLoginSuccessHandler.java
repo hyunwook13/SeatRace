@@ -8,7 +8,7 @@ import jakarta.servlet.http.HttpServletResponse;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import lombok.RequiredArgsConstructor;
-import org.example.seatrace.dto.JwtDto;
+import org.example.seatrace.dto.auth.JwtDto;
 import org.example.seatrace.dto.UserDto;
 import org.example.seatrace.entity.User;
 import org.example.seatrace.repository.UserRepository;
@@ -36,8 +36,8 @@ public class JwtLoginSuccessHandler implements AuthenticationSuccessHandler {
     User user = userRepository.findByEmail(details.getUsername())
         .orElseThrow(() -> new UsernameNotFoundException("User not found"));
 
-    String accessToken = jwtTokenProvider.generateToken(user.getName(), user.getRole().toString());
-    String refreshToken = jwtTokenProvider.generateToken(user.getName(), user.getRole().toString());
+    String accessToken = jwtTokenProvider.generateToken(user.getId(), user.getEmail(), user.getRole().toString());
+    String refreshToken = jwtTokenProvider.generateToken(user.getId(), user.getEmail(), user.getRole().toString());
 
     Cookie refreshCookie = new Cookie("REFRESH_TOKEN", refreshToken);
     refreshCookie.setHttpOnly(true);

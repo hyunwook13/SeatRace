@@ -7,11 +7,12 @@ import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.example.seatrace.entity.UserRole;
+import org.example.seatrace.security.CustomUserPrincipal;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.core.Authentication;
 import org.springframework.security.core.authority.SimpleGrantedAuthority;
 import org.springframework.security.core.context.SecurityContextHolder;
-import org.springframework.security.core.userdetails.User;
 import org.springframework.security.core.userdetails.UserDetails;
 import org.springframework.util.StringUtils;
 import org.springframework.web.filter.OncePerRequestFilter;
@@ -37,16 +38,23 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
       JWTClaimsSet claims = jwtTokenProvider.getClaims(token);
       String username = claims.getSubject();
 
-      String role = (String) claims.getClaim("role");
-      String authority = role != null && role.startsWith("ROLE_") ? role : "ROLE_" + role;
+      try {
+        Long userId = claims.getLongClaim("userId");
+        String roleStr = claims.getStringClaim("role");
+        
+        if (userId != null && roleStr != null) {
+          UserRole role = UserRole.valueOf(roleStr.replace("ROLE_", ""));
 
-      List<SimpleGrantedAuthority> authorities = Collections.singletonList(new SimpleGrantedAuthority(authority));
+          CustomUserPrincipal principal = new CustomUserPrincipal(userId, username, "", role);
+          Authentication authentication = new UsernamePasswordAuthenticationToken(
+              principal, token, principal.getAuthorities());
 
-      UserDetails principal = new User(username, "", authorities);
-      Authentication authentication = new UsernamePasswordAuthenticationToken(principal, token, authorities);
-
-      SecurityContextHolder.getContext().setAuthentication(authentication);
-      log.debug("Security Context에 '{}' 인증 정보를 저장했습니다.", username);
+          SecurityContextHolder.getContext().setAuthentication(authentication);
+          log.debug("Security Context에 '{}' 인증 정보를 저장했습니다.", username);
+        }
+      } catch (Exception e) {
+        log.error("JWT claims parsing error: {}", e.getMessage());
+      }
     }
 
     filterChain.doFilter(request, response);

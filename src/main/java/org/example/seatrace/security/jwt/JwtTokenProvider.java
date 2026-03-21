@@ -33,7 +33,7 @@ public class JwtTokenProvider {
     }
   }
 
-  public String generateToken(String username, String role) {
+  public String generateToken(Long userId, String username, String role) {
     try {
       Date now = new Date();
       Date expirationTime = new Date(now.getTime() + jwtProperties.getAccessTokenValidityInMs());
@@ -43,6 +43,7 @@ public class JwtTokenProvider {
           .subject(username)
           .issueTime(now)
           .expirationTime(expirationTime)
+          .claim("userId", userId)
           .claim("role", role)
           .build();
 
