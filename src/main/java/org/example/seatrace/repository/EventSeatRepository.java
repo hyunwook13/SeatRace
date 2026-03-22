@@ -1,7 +1,8 @@
 package org.example.seatrace.repository;
 
 import java.util.List;
-import org.example.seatrace.dto.EventSeatStats;
+import java.util.Optional;
+import org.example.seatrace.dto.seat.EventSeatStats;
 import org.example.seatrace.entity.Event;
 import org.example.seatrace.entity.EventSeat;
 import org.example.seatrace.entity.EventSeatStatus;
@@ -13,8 +14,22 @@ public interface EventSeatRepository extends JpaRepository<EventSeat, Long> {
 
   List<EventSeat> findAllByEvent(Event event);
 
+  Optional<EventSeat> findByEventIdAndSeatId(Long eventId, Long seatId);
+
+
   @Query("""
-      SELECT new org.example.seatrace.dto.EventSeatStats(
+        SELECT es
+        FROM EventSeat es
+        WHERE es.event.id = :eventId
+          AND es.seat.id IN :seatIds
+    """)
+  List<EventSeat> findEventSeats(
+      @Param("eventId") Long eventId,
+      @Param("seatIds") List<Long> seatIds
+  );
+
+  @Query("""
+      SELECT new org.example.seatrace.dto.seat.EventSeatStats(
           es.event.id,
           COUNT(es),
       SUM(CASE WHEN es.status = :available THEN 1 ELSE 0 END)
