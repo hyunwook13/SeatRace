@@ -97,12 +97,12 @@ jobs:
       id: render-task-def
       uses: aws-actions/amazon-ecs-render-task-definition@v1
       with:
-        task-definition: task-definition.json
+        task-definition: task-definition-clean.json
         container-name: ${{ secrets.CONTAINER_NAME }}
         image: ${{ needs.build-and-push-image.outputs.ecr_registry }}/${{ secrets.ECR_REPOSITORY }}:${{ needs.build-and-push-image.outputs.image_tag }}
 
     - name: Deploy to ECS
-      uses: aws-actions/amazon-ecs-deploy-task-definition@v1
+      uses: aws-actions/amazon-ecs-deploy-task-definition@v2
       with:
         task-definition: ${{ steps.render-task-def.outputs.task-definition }}
         service: ${{ secrets.ECS_SERVICE }}
