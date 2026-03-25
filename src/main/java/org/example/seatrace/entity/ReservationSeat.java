@@ -1,5 +1,6 @@
 package org.example.seatrace.entity;
 
+import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
 import jakarta.persistence.FetchType;
 import jakarta.persistence.GeneratedValue;
@@ -17,7 +18,7 @@ import lombok.NoArgsConstructor;
 @Getter
 @Table(name = "reservation_seats")
 @NoArgsConstructor(access = AccessLevel.PROTECTED)
-public class ReservationSeat {
+public class ReservationSeat extends BaseEntity {
 
   @Id
   @GeneratedValue(strategy = GenerationType.IDENTITY)
@@ -31,9 +32,25 @@ public class ReservationSeat {
   @JoinColumn(name = "event_seat_id", nullable = false)
   private EventSeat eventSeat;
 
+  @Column(nullable = false)
+  private boolean active;
+
   @Builder
-  public ReservationSeat(Reservation reservation, EventSeat eventSeat) {
+  private ReservationSeat(Reservation reservation, EventSeat eventSeat, boolean active) {
     this.reservation = reservation;
     this.eventSeat = eventSeat;
+    this.active = active;
+  }
+
+  public static ReservationSeat hold(Reservation reservation, EventSeat eventSeat) {
+    return ReservationSeat.builder()
+        .reservation(reservation)
+        .eventSeat(eventSeat)
+        .active(true)
+        .build();
+  }
+
+  public void deactivate() {
+    this.active = false;
   }
 }

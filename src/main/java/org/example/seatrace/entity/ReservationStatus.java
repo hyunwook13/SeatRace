@@ -1,7 +1,7 @@
 package org.example.seatrace.entity;
 
 public enum ReservationStatus {
-  PENDING,
+  HOLD,
   CONFIRMED,
   CANCELLED,
   EXPIRED

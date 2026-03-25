@@ -40,19 +40,19 @@ public class Reservation extends BaseEntity {
   @Column(nullable = false, length = 20)
   private ReservationStatus status;
 
-  @Column(nullable = false, precision = 10, scale = 2)
-  private BigDecimal totalAmount;
-
   @Column
   private LocalDateTime expiresAt;
 
   @Builder
-  public Reservation(User user, Event event, ReservationStatus status, BigDecimal totalAmount,
+  public Reservation(User user, Event event, ReservationStatus status,
       LocalDateTime expiresAt) {
     this.user = user;
     this.event = event;
     this.status = status;
-    this.totalAmount = totalAmount;
     this.expiresAt = expiresAt;
+  }
+
+  public void expire() {
+    this.status = ReservationStatus.EXPIRED;
   }
 }

@@ -15,7 +15,7 @@ import lombok.NoArgsConstructor;
 @Getter
 @Table(name = "venues")
 @NoArgsConstructor(access = AccessLevel.PROTECTED)
-public class Venue {
+public class Venue extends BaseEntity {
 
   @Id
   @GeneratedValue(strategy = GenerationType.IDENTITY)
