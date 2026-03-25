@@ -2,10 +2,14 @@ spring:
   application:
     name: SeatRace
   datasource:
-    url: jdbc:postgresql://localhost:5432/seatrace
+    url: ${SPRING_DATASOURCE_URL:jdbc:postgresql://localhost:5432/seatrace}
     username: ${DB_NAME}
     password: ${DB_PW}
     driver-class-name: org.postgresql.Driver
+  data:
+    redis:
+      host: ${REDIS_HOST:localhost}
+      port: ${REDIS_PORT:6379}
 
 server:
   servlet:
@@ -17,3 +21,13 @@ jwt:
   access-token-validity-in-ms: 3600000
   refresh-token-validity-in-ms: 1209600000
   issuer: "seat-race-server"
+
+reservation:
+  hold:
+    ttl-seconds: 10
+    cleanup-delay-ms: 3000
+
+management:
+  health:
+    redis:
+      enabled: false
