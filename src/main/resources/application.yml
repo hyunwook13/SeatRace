@@ -3,8 +3,8 @@ spring:
     name: SeatRace
   datasource:
     url: ${SPRING_DATASOURCE_URL:jdbc:postgresql://localhost:5432/seatrace}
-    username: ${DB_NAME}
-    password: ${DB_PW}
+    username: ${SPRING_DATASOURCE_USERNAME:seatrace}
+    password: ${SPRING_DATASOURCE_PASSWORD:}
     driver-class-name: org.postgresql.Driver
   data:
     redis:
@@ -17,7 +17,7 @@ server:
       tracking-modes: cookie
 
 jwt:
-  secret: ${JWT_SECRET}
+  secret: ${JWT_SECRET:local-dev-jwt-secret-which-is-256bits-long}
   access-token-validity-in-ms: 3600000
   refresh-token-validity-in-ms: 1209600000
   issuer: "seat-race-server"
@@ -26,8 +26,40 @@ reservation:
   hold:
     ttl-seconds: 10
     cleanup-delay-ms: 3000
+    stream-batch-size: 200
 
 management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,prometheus,metrics
   health:
     redis:
       enabled: false
+  metrics:
+    distribution:
+      percentiles-histogram:
+        seatrace_hold_stale_cleanup_duration_seconds: true
+      maximum-expected-value:
+        seatrace_hold_stale_cleanup_duration_seconds: 10s
+
+resilience4j:
+  retry:
+    instances:
+      holdCleanup:
+        max-attempts: 3
+        wait-duration: 300ms
+        retry-exceptions:
+          - org.springframework.dao.CannotAcquireLockException
+          - org.springframework.dao.DeadlockLoserDataAccessException
+          - org.springframework.dao.QueryTimeoutException
+          - org.springframework.dao.TransientDataAccessException
+          - org.springframework.orm.ObjectOptimisticLockingFailureException
+  circuitbreaker:
+    instances:
+      holdCleanup:
+        sliding-window-type: COUNT_BASED
+        sliding-window-size: 20
+        failure-rate-threshold: 50
+        wait-duration-in-open-state: 10s
+        permitted-number-of-calls-in-half-open-state: 3

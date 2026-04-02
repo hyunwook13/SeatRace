@@ -13,4 +13,8 @@ public class ReservationHoldProperties {
 
   private long ttlSeconds = 10;
   private long cleanupDelayMs = 3000;
+  private int chunkSize = 20;
+  private int maxRetryAttempts = 3;
+  private long retryDelayMs = 500;
+  private int streamBatchSize = 200;
 }
