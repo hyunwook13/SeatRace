@@ -28,6 +28,13 @@ reservation:
     cleanup-delay-ms: 3000
     stream-batch-size: 200
 
+virtual-queue:
+  enabled: true
+  tps: 500
+  active-limit: 2000
+  active-ttl-seconds: 60
+  max-advance-per-call: 50
+
 management:
   endpoints:
     web:
