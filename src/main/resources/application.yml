@@ -27,6 +27,12 @@ reservation:
     ttl-seconds: 10
     cleanup-delay-ms: 3000
     stream-batch-size: 200
+  lock:
+    enabled: false
+    wait-timeout-ms: 200
+    lease-ms: 1000
+    retry-delay-ms: 20
+    max-retry: 10
 
 virtual-queue:
   enabled: true
@@ -35,20 +41,38 @@ virtual-queue:
   active-ttl-seconds: 60
   max-advance-per-call: 50
 
+# --- 모니터링 설정 보강 시작 ---
 management:
   endpoints:
     web:
       exposure:
-        include: health,info,prometheus,metrics
+        include: prometheus, health, info, metrics
+  endpoint:
+    prometheus:
+      enabled: true
+    health:
+      show-details: always
   health:
     redis:
       enabled: false
   metrics:
+    tags:
+      application: ${spring.application.name}
     distribution:
       percentiles-histogram:
+        # 모든 HTTP 요청에 대해 P95, P99 계산을 위한 히스토그램 활성화
+        http.server.requests: true
         seatrace_hold_stale_cleanup_duration_seconds: true
+      percentiles:
+        # 주요 구간 분위수 설정
+        http.server.requests: 0.5, 0.75, 0.95, 0.99
       maximum-expected-value:
+        http.server.requests: 10s
         seatrace_hold_stale_cleanup_duration_seconds: 10s
+    enable:
+      # JVM 상세 지표 활성화 (메모리, 쓰레드 등)
+      jvm: true
+# --- 모니터링 설정 보강 끝 ---
 
 resilience4j:
   retry:

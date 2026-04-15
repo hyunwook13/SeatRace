@@ -1,13 +1,13 @@
 package org.example.seatrace.dto.seat;
 
+import com.fasterxml.jackson.annotation.JsonCreator;
+import com.fasterxml.jackson.annotation.JsonProperty;
 import java.time.LocalDateTime;
 import lombok.Getter;
-import lombok.RequiredArgsConstructor;
 import org.example.seatrace.entity.EventSeat;
 import org.example.seatrace.entity.EventSeatStatus;
 
 @Getter
-@RequiredArgsConstructor
 public class EventSeatSummary {
 
   private final Long seatId;
@@ -17,6 +17,25 @@ public class EventSeatSummary {
   private final String grade;
   private final EventSeatStatus status;
   private final LocalDateTime heldUntil;
+
+  @JsonCreator
+  public EventSeatSummary(
+      @JsonProperty("seatId") Long seatId,
+      @JsonProperty("section") String section,
+      @JsonProperty("rowNo") String rowNo,
+      @JsonProperty("seatNo") String seatNo,
+      @JsonProperty("grade") String grade,
+      @JsonProperty("status") EventSeatStatus status,
+      @JsonProperty("heldUntil") LocalDateTime heldUntil
+  ) {
+    this.seatId = seatId;
+    this.section = section;
+    this.rowNo = rowNo;
+    this.seatNo = seatNo;
+    this.grade = grade;
+    this.status = status;
+    this.heldUntil = heldUntil;
+  }
 
   public static EventSeatSummary from(EventSeat seat) {
     return new EventSeatSummary(seat.getSeat().getId(), seat.getSeat().getSection(),

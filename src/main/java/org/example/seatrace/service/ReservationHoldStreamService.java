@@ -2,6 +2,7 @@ package org.example.seatrace.service;
 
 import io.micrometer.core.instrument.Counter;
 import io.micrometer.core.instrument.MeterRegistry;
+import java.time.Duration;
 import java.time.LocalDateTime;
 import java.time.ZoneId;
 import java.util.ArrayList;
@@ -12,13 +13,7 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.dao.InvalidDataAccessApiUsageException;
 import org.springframework.data.domain.Range;
-import org.springframework.data.redis.connection.RedisSystemException;
-import org.springframework.data.redis.connection.stream.MapRecord;
 import org.springframework.data.redis.connection.stream.RecordId;
-import org.springframework.data.redis.core.StringRedisTemplate;
-import org.springframework.data.redis.core.StreamOperations;
-import org.springframework.data.redis.core.StreamRecords;
-import org.springframework.data.redis.connection.Limit;
 import org.springframework.stereotype.Service;
 
 @Slf4j
@@ -31,7 +26,7 @@ public class ReservationHoldStreamService {
   private static final String MAX_SEQUENCE = "18446744073709551615";
   private static final int MAX_ADD_RETRY = 5;
 
-  private final StringRedisTemplate stringRedisTemplate;
+  private final RedisFacade redisFacade;
   private final MeterRegistry meterRegistry;
 
   public void enqueueHold(Long reservationId, LocalDateTime expiresAt) {
@@ -44,25 +39,25 @@ public class ReservationHoldStreamService {
         "reservationId", reservationId.toString(),
         "expiresAtMillis", String.valueOf(expiresAtMillis)
     );
-
-    StreamOperations<String, String, String> ops = stringRedisTemplate.opsForStream();
     boolean added = false;
     long seq = reservationId;
+    Exception lastException = null;
 
     for (int attempt = 0; attempt < MAX_ADD_RETRY; attempt++) {
       try {
-        RecordId id = RecordId.of(expiresAtMillis + "-" + seq);
-        MapRecord<String, String, String> record =
-            StreamRecords.newRecord().in(STREAM_KEY).ofMap(body).withId(id);
-        ops.add(record);
+        redisFacade.xAdd(STREAM_KEY, expiresAtMillis + "-" + seq, body);
         added = true;
         Counter.builder("seatrace.hold.stream.enqueued.total")
             .description("Total number of hold expiration entries enqueued to Redis Stream")
             .register(meterRegistry)
             .increment();
         break;
-      } catch (InvalidDataAccessApiUsageException | RedisSystemException ex) {
+      } catch (InvalidDataAccessApiUsageException ex) {
         seq++;
+        lastException = ex;
+      } catch (Exception ex) {
+        lastException = ex;
+        break;
       }
     }
 
@@ -72,7 +67,7 @@ public class ReservationHoldStreamService {
           .register(meterRegistry)
           .increment();
       log.error("홀드 만료 스트림 enqueue 실패: reservationId={}, expiresAtMillis={}",
-          reservationId, expiresAtMillis);
+          reservationId, expiresAtMillis, lastException);
     }
   }
 
@@ -81,13 +76,19 @@ public class ReservationHoldStreamService {
       return HoldExpireBatch.empty();
     }
 
-    String lastId = getLastProcessedId();
-    long nowMillis = System.currentTimeMillis();
-    String maxId = nowMillis + "-" + MAX_SEQUENCE;
+    String lastId;
+    List<org.springframework.data.redis.connection.stream.MapRecord<String, Object, Object>> records;
+    try {
+      lastId = getLastProcessedId();
+      long nowMillis = System.currentTimeMillis();
+      String maxId = nowMillis + "-" + MAX_SEQUENCE;
 
-    Range<String> range = Range.of(Range.Bound.exclusive(lastId), Range.Bound.inclusive(maxId));
-    List<MapRecord<String, String, String>> records =
-        stringRedisTemplate.opsForStream().range(STREAM_KEY, range, Limit.limit().count(maxCount));
+      Range<String> range = Range.of(Range.Bound.exclusive(lastId), Range.Bound.inclusive(maxId));
+      records = redisFacade.xRange(STREAM_KEY, range, maxCount);
+    } catch (Exception ex) {
+      log.warn("홀드 만료 스트림 read 실패", ex);
+      return HoldExpireBatch.empty();
+    }
 
     if (records == null || records.isEmpty()) {
       Counter.builder("seatrace.hold.stream.empty.total")
@@ -99,9 +100,10 @@ public class ReservationHoldStreamService {
 
     List<Long> reservationIds = new ArrayList<>(records.size());
     List<RecordId> recordIds = new ArrayList<>(records.size());
-    for (MapRecord<String, String, String> record : records) {
+    for (org.springframework.data.redis.connection.stream.MapRecord<String, Object, Object> record : records) {
       recordIds.add(record.getId());
-      String rawReservationId = record.getValue().get("reservationId");
+      Object rawReservationIdValue = record.getValue().get("reservationId");
+      String rawReservationId = rawReservationIdValue == null ? null : rawReservationIdValue.toString();
       if (rawReservationId != null) {
         try {
           reservationIds.add(Long.parseLong(rawReservationId));
@@ -126,8 +128,13 @@ public class ReservationHoldStreamService {
     }
 
     RecordId[] ids = batch.recordIds().toArray(new RecordId[0]);
-    stringRedisTemplate.opsForStream().delete(STREAM_KEY, ids);
-    stringRedisTemplate.opsForValue().set(STREAM_LAST_ID_KEY, batch.lastId());
+    try {
+      redisFacade.xDel(STREAM_KEY, ids);
+      redisFacade.set(STREAM_LAST_ID_KEY, batch.lastId());
+    } catch (Exception ex) {
+      log.warn("홀드 만료 스트림 markProcessed 실패: lastId={}", batch.lastId(), ex);
+      return;
+    }
 
     Counter.builder("seatrace.hold.stream.deleted.total")
         .description("Total number of processed hold entries deleted from stream")
@@ -136,8 +143,12 @@ public class ReservationHoldStreamService {
   }
 
   private String getLastProcessedId() {
-    String lastId = stringRedisTemplate.opsForValue().get(STREAM_LAST_ID_KEY);
-    return Objects.requireNonNullElse(lastId, "0-0");
+    try {
+      String lastId = redisFacade.get(STREAM_LAST_ID_KEY);
+      return Objects.requireNonNullElse(lastId, "0-0");
+    } catch (Exception ex) {
+      return "0-0";
+    }
   }
 
   public record HoldExpireBatch(List<Long> reservationIds, List<RecordId> recordIds, String lastId) {
