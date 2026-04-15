@@ -11,12 +11,17 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.example.seatrace.dto.reservation.HoldSeatRequest;
 import org.example.seatrace.dto.reservation.HoldSeatResponse;
+import org.example.seatrace.dto.reservation.ReservationResponse;
 import org.example.seatrace.entity.Event;
 import org.example.seatrace.entity.EventSeat;
 import org.example.seatrace.entity.Reservation;
 import org.example.seatrace.entity.ReservationSeat;
 import org.example.seatrace.entity.ReservationStatus;
 import org.example.seatrace.entity.User;
+import org.example.seatrace.dto.seat.SeatSummary;
+import org.example.seatrace.exception.ReservationConflictException;
+import org.example.seatrace.exception.ReservationNotFoundException;
+import org.example.seatrace.exception.SeatAlreadyTakenException;
 import org.example.seatrace.repository.EventRepository;
 import org.example.seatrace.repository.EventSeatRepository;
 import org.example.seatrace.repository.ReservationRepository;
@@ -67,110 +72,192 @@ public class ReservationService {
           .tag("reason", "redis_fast_fail")
           .register(meterRegistry)
           .increment();
-      throw new IllegalStateException("이미 선택된 좌석이 있습니다.");
+      throw new SeatAlreadyTakenException("이미 선택된 좌석이 있습니다.");
     }
 
     // 2. 이미 점유된 좌석 있는지 확인
-    List<ReservationSeat> alreadyTaken =
-        reservationSeatRepository.findActiveSeats(eventId, seatIds);
+      List<ReservationSeat> alreadyTaken =
+          reservationSeatRepository.findActiveSeats(eventId, seatIds);
 
-    releaseMissingRedisHolds(alreadyTaken);
-    alreadyTaken = reservationSeatRepository.findActiveSeats(eventId, seatIds);
+      releaseMissingRedisHolds(alreadyTaken);
+      alreadyTaken = reservationSeatRepository.findActiveSeats(eventId, seatIds);
 
-    log.info("활성 예약 좌석 조회 결과: eventId={}, requestedSeatIds={}, matchedCount={}, matchedEventSeatIds={}",
-        eventId,
-        seatIds,
-        alreadyTaken.size(),
-        alreadyTaken.stream().map(rs -> rs.getEventSeat().getId()).toList());
+      log.info("활성 예약 좌석 조회 결과: eventId={}, requestedSeatIds={}, matchedCount={}, matchedEventSeatIds={}",
+          eventId,
+          seatIds,
+          alreadyTaken.size(),
+          alreadyTaken.stream().map(rs -> rs.getEventSeat().getId()).toList());
 
-    if (!alreadyTaken.isEmpty()) {
-      Counter.builder("seatrace.hold.fail.total")
-          .description("Failed hold seat requests")
-          .tag("reason", "already_taken")
+      if (!alreadyTaken.isEmpty()) {
+        Counter.builder("seatrace.hold.fail.total")
+            .description("Failed hold seat requests")
+            .tag("reason", "already_taken")
+            .register(meterRegistry)
+            .increment();
+        throw new IllegalStateException("이미 선택된 좌석이 있습니다.");
+      }
+
+      User user = userRepository.getReferenceById(userId);
+      Event event = eventRepository.getReferenceById(eventId);
+
+      List<EventSeat> seats = eventSeatRepository.findEventSeats(eventId, seatIds);
+      log.info("이벤트 좌석 조회 결과: eventId={}, requestedSeatIds={}, foundCount={}, foundSeatIds={}, foundEventSeatIds={}",
+          eventId,
+          seatIds,
+          seats.size(),
+          seats.stream().map(es -> es.getSeat().getId()).toList(),
+          seats.stream().map(EventSeat::getId).toList());
+
+      if (seats.size() != seatIds.size()) {
+        Counter.builder("seatrace.hold.fail.total")
+            .description("Failed hold seat requests")
+            .tag("reason", "seat_not_found")
+            .register(meterRegistry)
+            .increment();
+        throw new IllegalArgumentException("요청한 좌석을 모두 찾지 못했습니다. seatId/eventSeatId 전달값을 확인하세요.");
+      }
+
+      seats.forEach(seat -> seat.holdUntil(expiresAt));
+
+      try {
+        eventSeatRepository.saveAllAndFlush(seats);
+      } catch (ObjectOptimisticLockingFailureException ex) {
+        log.warn("낙관적 락 충돌: eventId={}, requestedSeatIds={}", eventId, seatIds, ex);
+        Counter.builder("seatrace.hold.fail.total")
+            .description("Failed hold seat requests")
+            .tag("reason", "optimistic_lock_conflict")
+            .register(meterRegistry)
+            .increment();
+        Counter.builder("seatrace.hold.optimistic_lock.conflict.total")
+            .description("Total number of optimistic lock conflicts during hold")
+            .register(meterRegistry)
+            .increment();
+        throw new IllegalStateException("다른 사용자가 같은 좌석을 먼저 점유했습니다. 다시 시도해주세요.");
+      }
+
+      // 4. reservation 생성 (HOLD 상태)
+      Reservation reservation = Reservation.builder()
+          .user(user)
+          .event(event)
+          .status(ReservationStatus.HOLD)
+          .expiresAt(expiresAt)
+          .build();
+
+      reservationRepository.save(reservation);
+
+      // 5. reservation_seat 생성 (핵심)
+      List<ReservationSeat> reservationSeats = seats.stream()
+          .map(seat -> ReservationSeat.hold(reservation, seat))
+          .toList();
+
+      log.info("reservation_seat 저장 시도: reservationId={}, eventId={}, reservationSeatCount={}, eventSeatIds={}",
+          reservation.getId(),
+          eventId,
+          reservationSeats.size(),
+          reservationSeats.stream().map(rs -> rs.getEventSeat().getId()).toList());
+
+      reservationSeatRepository.saveAll(reservationSeats);
+      registerRedisHoldAfterCommit(
+          reservation.getId(),
+          seats.stream().map(EventSeat::getId).toList(),
+          expiresAt
+      );
+
+      Counter.builder("seatrace.hold.success.total")
+          .description("Successful hold seat requests")
           .register(meterRegistry)
           .increment();
-      throw new IllegalStateException("이미 선택된 좌석이 있습니다.");
+
+      // 6. 응답
+      return HoldSeatResponse.builder()
+          .reservationId(reservation.getId())
+          .eventId(eventId)
+          .seatIds(seatIds)
+          .status(ReservationStatus.HOLD)
+          .expiresAt(expiresAt)
+          .build();
+  }
+
+  @Transactional
+  public ReservationResponse confirmReservation(Long userId, Long reservationId) {
+    Reservation reservation = reservationRepository.findByIdAndUser_Id(reservationId, userId)
+        .orElseThrow(() -> new ReservationNotFoundException("예약을 찾을 수 없습니다."));
+
+    if (reservation.getStatus() == ReservationStatus.CONFIRMED) {
+      return buildReservationResponse(reservation);
     }
 
-    User user = userRepository.getReferenceById(userId);
-    Event event = eventRepository.getReferenceById(eventId);
-
-    List<EventSeat> seats = eventSeatRepository.findEventSeats(eventId, seatIds);
-    log.info("이벤트 좌석 조회 결과: eventId={}, requestedSeatIds={}, foundCount={}, foundSeatIds={}, foundEventSeatIds={}",
-        eventId,
-        seatIds,
-        seats.size(),
-        seats.stream().map(es -> es.getSeat().getId()).toList(),
-        seats.stream().map(EventSeat::getId).toList());
-
-    if (seats.size() != seatIds.size()) {
-      Counter.builder("seatrace.hold.fail.total")
-          .description("Failed hold seat requests")
-          .tag("reason", "seat_not_found")
-          .register(meterRegistry)
-          .increment();
-      throw new IllegalArgumentException("요청한 좌석을 모두 찾지 못했습니다. seatId/eventSeatId 전달값을 확인하세요.");
+    if (reservation.getStatus() != ReservationStatus.HOLD) {
+      throw new ReservationConflictException("확정할 수 없는 예약 상태입니다.");
     }
 
-    seats.forEach(seat -> seat.holdUntil(expiresAt));
-
-    try {
-      eventSeatRepository.saveAllAndFlush(seats);
-    } catch (ObjectOptimisticLockingFailureException ex) {
-      log.warn("낙관적 락 충돌: eventId={}, requestedSeatIds={}", eventId, seatIds, ex);
-      Counter.builder("seatrace.hold.fail.total")
-          .description("Failed hold seat requests")
-          .tag("reason", "optimistic_lock_conflict")
-          .register(meterRegistry)
-          .increment();
-      Counter.builder("seatrace.hold.optimistic_lock.conflict.total")
-          .description("Total number of optimistic lock conflicts during hold")
-          .register(meterRegistry)
-          .increment();
-      throw new IllegalStateException("다른 사용자가 같은 좌석을 먼저 점유했습니다. 다시 시도해주세요.");
+    List<ReservationSeat> activeSeats =
+        reservationSeatRepository.findAllByReservationIdAndActiveTrue(reservationId);
+    if (activeSeats.isEmpty()) {
+      throw new ReservationConflictException("확정할 좌석이 없습니다.");
     }
 
-    // 3. reservation 생성 (HOLD 상태)
-    Reservation reservation = Reservation.builder()
-        .user(user)
-        .event(event)
-        .status(ReservationStatus.HOLD)
-        .expiresAt(expiresAt)
-        .build();
+    activeSeats.forEach(reservationSeat -> reservationSeat.getEventSeat().reserve());
+    reservation.confirm();
 
-    reservationRepository.save(reservation);
-
-    // 4. reservation_seat 생성 (핵심)
-    List<ReservationSeat> reservationSeats = seats.stream()
-        .map(seat -> ReservationSeat.hold(reservation, seat))
+    List<Long> eventSeatIds = activeSeats.stream()
+        .map(reservationSeat -> reservationSeat.getEventSeat().getId())
         .toList();
 
-    log.info("reservation_seat 저장 시도: reservationId={}, eventId={}, reservationSeatCount={}, eventSeatIds={}",
-        reservation.getId(),
-        eventId,
-        reservationSeats.size(),
-        reservationSeats.stream().map(rs -> rs.getEventSeat().getId()).toList());
+    TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+      @Override
+      public void afterCommit() {
+        reservationHoldRedisService.clearHold(reservationId, eventSeatIds);
+      }
+    });
 
-    reservationSeatRepository.saveAll(reservationSeats);
-    registerRedisHoldAfterCommit(
-        reservation.getId(),
-        seats.stream().map(EventSeat::getId).toList(),
-        expiresAt
-    );
-
-    Counter.builder("seatrace.hold.success.total")
-        .description("Successful hold seat requests")
+    Counter.builder("seatrace.reservation.confirm.success.total")
+        .description("Successful reservation confirmations")
         .register(meterRegistry)
         .increment();
 
-    // 5. 응답
-    return HoldSeatResponse.builder()
-        .reservationId(reservation.getId())
-        .eventId(eventId)
-        .seatIds(seatIds)
-        .status(ReservationStatus.HOLD)
-        .expiresAt(expiresAt)
-        .build();
+    return buildReservationResponse(reservation);
+  }
+
+  @Transactional
+  public ReservationResponse cancelReservation(Long userId, Long reservationId) {
+    Reservation reservation = reservationRepository.findByIdAndUser_Id(reservationId, userId)
+        .orElseThrow(() -> new ReservationNotFoundException("예약을 찾을 수 없습니다."));
+
+    if (reservation.getStatus() == ReservationStatus.CANCELLED) {
+      return buildReservationResponse(reservation);
+    }
+
+    if (reservation.getStatus() == ReservationStatus.EXPIRED) {
+      throw new ReservationConflictException("이미 만료된 예약은 취소할 수 없습니다.");
+    }
+
+    List<ReservationSeat> activeSeats =
+        reservationSeatRepository.findAllByReservationIdAndActiveTrue(reservationId);
+    activeSeats.forEach(reservationSeat -> {
+      reservationSeat.deactivate();
+      reservationSeat.getEventSeat().releaseHold();
+    });
+
+    reservation.cancel();
+
+    List<Long> eventSeatIds = activeSeats.stream()
+        .map(reservationSeat -> reservationSeat.getEventSeat().getId())
+        .toList();
+
+    TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+      @Override
+      public void afterCommit() {
+        reservationHoldRedisService.clearHold(reservationId, eventSeatIds);
+      }
+    });
+
+    Counter.builder("seatrace.reservation.cancel.success.total")
+        .description("Successful reservation cancellations")
+        .register(meterRegistry)
+        .increment();
+
+    return buildReservationResponse(reservation);
   }
 
   @Transactional
@@ -279,6 +366,30 @@ public class ReservationService {
     }
   }
 
+  private ReservationResponse buildReservationResponse(Reservation reservation) {
+    List<ReservationSeat> reservationSeats =
+        reservationSeatRepository.findAllByReservationId(reservation.getId());
+
+    return ReservationResponse.builder()
+        .reservationId(reservation.getId())
+        .userId(reservation.getUser().getId())
+        .eventId(reservation.getEvent().getId())
+        .eventName(reservation.getEvent().getName())
+        .venueId(reservation.getEvent().getVenue().getId())
+        .venueName(reservation.getEvent().getVenue().getName())
+        .seatIds(reservationSeats.stream()
+            .map(reservationSeat -> reservationSeat.getEventSeat().getSeat().getId())
+            .toList())
+        .seats(reservationSeats.stream()
+            .map(reservationSeat -> SeatSummary.from(reservationSeat.getEventSeat().getSeat()))
+            .toList())
+        .status(reservation.getStatus())
+        .expiresAt(reservation.getExpiresAt())
+        .createdAt(reservation.getCreatedAt())
+        .updatedAt(reservation.getUpdatedAt())
+        .build();
+  }
+
   private void registerRedisHoldAfterCommit(
       Long reservationId,
       List<Long> eventSeatIds,
@@ -292,4 +403,5 @@ public class ReservationService {
       }
     });
   }
+
 }

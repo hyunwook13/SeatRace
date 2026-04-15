@@ -64,4 +64,9 @@ public class EventSeat extends BaseEntity {
     this.status = EventSeatStatus.AVAILABLE;
     this.heldUntil = null;
   }
+
+  public void reserve() {
+    this.status = EventSeatStatus.RESERVED;
+    this.heldUntil = null;
+  }
 }

@@ -23,4 +23,6 @@ public interface ReservationSeatRepository extends JpaRepository<ReservationSeat
   );
 
   List<ReservationSeat> findAllByReservationIdAndActiveTrue(Long reservationId);
+
+  List<ReservationSeat> findAllByReservationId(Long reservationId);
 }

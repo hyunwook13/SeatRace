@@ -2,11 +2,15 @@ package org.example.seatrace.controller;
 
 import java.util.List;
 import lombok.RequiredArgsConstructor;
+import org.example.seatrace.dto.queue.QueueEnterResponse;
 import org.example.seatrace.dto.seat.EventSeatListResponse;
 import org.example.seatrace.dto.event.EventResponse;
+import org.example.seatrace.security.CustomUserPrincipal;
 import org.example.seatrace.service.EventSeatService;
 import org.example.seatrace.service.EventService;
+import org.example.seatrace.service.VirtualQueueService;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -20,6 +24,7 @@ public class EventController {
 
   private final EventService eventService;
   private final EventSeatService eventSeatService;
+  private final VirtualQueueService virtualQueueService;
 
   @GetMapping
   public ResponseEntity<List<EventResponse>> listEvents() {
@@ -27,7 +32,19 @@ public class EventController {
   }
 
   @GetMapping("/{eventId}/seats")
-  public ResponseEntity<EventSeatListResponse> listSeats(@PathVariable Long eventId) {
+  public ResponseEntity<?> listSeats(
+      @PathVariable Long eventId,
+      @AuthenticationPrincipal CustomUserPrincipal principal
+  ) {
+    if (principal == null) {
+      return ResponseEntity.status(401).build();
+    }
+
+    QueueEnterResponse queue = virtualQueueService.enterOrWait(eventId, principal.getUserId());
+    if (!queue.admitted()) {
+      return ResponseEntity.status(429).body(queue);
+    }
+
     return ResponseEntity.ok(EventSeatListResponse.from(eventSeatService.listSeats(eventId)));
   }
 }

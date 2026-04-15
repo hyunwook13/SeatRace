@@ -27,12 +27,6 @@ reservation:
     ttl-seconds: 10
     cleanup-delay-ms: 3000
     stream-batch-size: 200
-  lock:
-    enabled: false
-    wait-timeout-ms: 200
-    lease-ms: 1000
-    retry-delay-ms: 20
-    max-retry: 10
 
 virtual-queue:
   enabled: true
