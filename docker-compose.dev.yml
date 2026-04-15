@@ -1,0 +1,53 @@
+services:
+  redis:
+    image: redis:7
+    container_name: seatrace-redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: seatrace-app
+    depends_on:
+      redis:
+        condition: service_healthy
+    env_file:
+      - .env
+    environment:
+      SPRING_PROFILES_ACTIVE: dev
+      SPRING_DATASOURCE_URL: ${SPRING_DATASOURCE_URL}
+      SPRING_DATASOURCE_USERNAME: ${DB_NAME}
+      SPRING_DATASOURCE_PASSWORD: ${DB_PW}
+      REDIS_HOST: ${REDIS_HOST_DOCKER:-redis}
+      REDIS_PORT: ${REDIS_PORT_DOCKER:-6379}
+    ports:
+      - "8080:8080"
+    restart: unless-stopped
+
+  prometheus:
+    image: prom/prometheus:v2.54.1
+    container_name: seatrace-prometheus
+    depends_on:
+      - app
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.path=/prometheus
+    volumes:
+      - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus-data:/prometheus
+    ports:
+      - "9090:9090"
+    restart: unless-stopped
+
+volumes:
+  redis-data:
+  prometheus-data:

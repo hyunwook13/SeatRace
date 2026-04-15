@@ -4,14 +4,14 @@ services:
     container_name: seatrace-postgres
     environment:
       POSTGRES_DB: seatrace
-      POSTGRES_USER: ${DB_NAME}
-      POSTGRES_PASSWORD: ${DB_PW}
+      POSTGRES_USER: ${DB_NAME:-seatrace}
+      POSTGRES_PASSWORD: ${DB_PW:-seatrace}
     ports:
       - "5432:5432"
     volumes:
       - postgres-data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${DB_NAME} -d seatrace"]
+      test: ["CMD-SHELL", "pg_isready -U ${DB_NAME:-seatrace} -d seatrace"]
       interval: 10s
       timeout: 5s
       retries: 10
@@ -42,13 +42,49 @@ services:
     env_file:
       - .env
     environment:
-      DB_URL: jdbc:postgresql://postgres:5432/seatrace
-      REDIS_HOST: redis
-      REDIS_PORT: 6379
+      SPRING_PROFILES_ACTIVE: ${SPRING_PROFILES_ACTIVE:-}
+      SPRING_DATASOURCE_URL: ${SPRING_DATASOURCE_URL_DOCKER:-jdbc:postgresql://postgres:5432/seatrace}
+      SPRING_DATASOURCE_USERNAME: ${DB_NAME:-seatrace}
+      SPRING_DATASOURCE_PASSWORD: ${DB_PW:-seatrace}
+      REDIS_HOST: ${REDIS_HOST_DOCKER:-redis}
+      REDIS_PORT: ${REDIS_PORT_DOCKER:-6379}
     ports:
       - "8080:8080"
+    restart: unless-stopped
+
+  prometheus:
+    image: prom/prometheus:v2.54.1
+    container_name: seatrace-prometheus
+    depends_on:
+      - app
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.path=/prometheus
+    volumes:
+      - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus-data:/prometheus
+    ports:
+      - "9090:9090"
+    restart: unless-stopped
+
+  grafana:
+    image: grafana/grafana:10.0.4
+    container_name: seatrace-grafana
+    depends_on:
+      - prometheus
+    environment:
+      - GF_SECURITY_ADMIN_USER=admin
+      - GF_SECURITY_ADMIN_PASSWORD=admin
+      - GF_INSTALL_PLUGINS=grafana-piechart-panel
+    volumes:
+      - grafana-data:/var/lib/grafana
+      - ./grafana/provisioning:/etc/grafana/provisioning
+    ports:
+      - "3000:3000"
     restart: unless-stopped
 
 volumes:
   postgres-data:
   redis-data:
+  prometheus-data:
+  grafana-data:
