@@ -1,0 +1,87 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>SeatRace</title>
+  <link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+  <div class="ambient ambient-a"></div>
+  <div class="ambient ambient-b"></div>
+
+  <main class="shell app-shell">
+    <header class="topbar card">
+      <div>
+        <p class="eyebrow">SeatRace</p>
+        <h1>지금 예매 가능한 이벤트</h1>
+        <p class="topbar-copy">첫 화면에서 이벤트를 둘러보고, 필요한 순간에만 로그인하세요.</p>
+      </div>
+      <div class="topbar-actions">
+        <span id="userState" class="user-pill">미로그인</span>
+        <a id="loginLink" class="ghost-button" href="/login.html">로그인</a>
+        <a id="signupLink" class="ghost-button" href="/signup.html">회원가입</a>
+        <button id="logoutBtn" class="ghost-button hidden" type="button">로그아웃</button>
+      </div>
+    </header>
+
+    <section class="hero card service-hero">
+      <div class="hero-copy">
+        <p class="section-kicker">Featured</p>
+        <h2 id="featuredTitle">이벤트를 불러오는 중</h2>
+        <p id="featuredCopy" class="lede">잠시만 기다리면 현재 등록된 이벤트가 표시됩니다.</p>
+        <div id="featuredMeta" class="hero-badges"></div>
+      </div>
+      <div class="hero-cta">
+        <button id="featuredReserveBtn" class="primary-button" type="button">예약하기</button>
+        <button id="featuredLikeBtn" class="ghost-button" type="button">관심 등록</button>
+      </div>
+    </section>
+
+    <section class="layout service-layout">
+      <section class="main-column">
+        <section class="card stack">
+          <div class="section-head">
+            <div>
+              <p class="section-kicker">이벤트</p>
+              <h2>추천 리스트</h2>
+            </div>
+            <button id="refreshEventsBtn" class="ghost-button" type="button">새로고침</button>
+          </div>
+          <div id="eventsGrid" class="events-grid">
+            <article class="event-card placeholder">이벤트를 불러오세요.</article>
+          </div>
+        </section>
+      </section>
+
+      <aside class="card sidebar">
+        <div class="section-head">
+          <div>
+            <p class="section-kicker">내 공간</p>
+            <h2>선택한 이벤트</h2>
+          </div>
+        </div>
+
+        <div id="selectedPanel" class="selected-panel">
+          <p class="muted">이벤트를 선택하면 상세 정보가 표시됩니다.</p>
+        </div>
+
+        <section class="mini-panel">
+          <div class="mini-head">
+            <h3>관심 이벤트</h3>
+            <span id="favoritesCount" class="chip">0</span>
+          </div>
+          <div id="favoritesList" class="favorites-list">
+            <p class="muted">관심 등록한 이벤트가 없습니다.</p>
+          </div>
+        </section>
+      </aside>
+    </section>
+  </main>
+
+  <div id="toast" class="toast" aria-live="polite"></div>
+
+  <script src="/auth.js"></script>
+  <script src="/app.js"></script>
+</body>
+</html>

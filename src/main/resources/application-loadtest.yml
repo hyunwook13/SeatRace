@@ -1,0 +1,14 @@
+spring:
+  config:
+    activate:
+      on-profile: loadtest
+
+virtual-queue:
+  enabled: false
+
+reservation:
+  lock:
+    enabled: false
+  hold:
+    ttl-seconds: 60
+    cleanup-delay-ms: 1000

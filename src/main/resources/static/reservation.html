@@ -1,0 +1,93 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>SeatRace Reservation</title>
+  <link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+  <div class="ambient ambient-a"></div>
+  <div class="ambient ambient-b"></div>
+
+  <main class="shell app-shell">
+    <header class="topbar card">
+      <div>
+        <p class="eyebrow">SeatRace</p>
+        <h1 id="pageTitle">예약하기</h1>
+        <p id="pageCopy" class="topbar-copy">좌석을 선택하고 예약을 진행하세요.</p>
+      </div>
+      <div class="topbar-actions">
+        <span id="userState" class="user-pill">미로그인</span>
+        <a id="homeLink" class="ghost-button" href="/">홈</a>
+        <a id="loginLink" class="ghost-button" href="/login.html">로그인</a>
+        <a id="signupLink" class="ghost-button" href="/signup.html">회원가입</a>
+        <button id="logoutBtn" class="ghost-button hidden" type="button">로그아웃</button>
+      </div>
+    </header>
+
+    <section class="hero card reservation-hero">
+      <div class="hero-copy">
+        <p class="section-kicker">Selected Event</p>
+        <h2 id="featuredTitle">이벤트를 불러오는 중</h2>
+        <p id="featuredCopy" class="lede">좌석 정보를 불러오고 있습니다.</p>
+        <div id="featuredMeta" class="hero-badges"></div>
+      </div>
+      <div class="hero-cta">
+        <button id="loadSeatsBtn" class="primary-button" type="button">좌석 새로고침</button>
+        <button id="queueBtn" class="ghost-button" type="button">대기열 진입</button>
+        <button id="reserveBtn" class="primary-button" type="button">예약하기</button>
+      </div>
+    </section>
+
+    <section class="layout reservation-layout">
+      <section class="main-column">
+        <section class="card stack">
+          <div class="section-head">
+            <div>
+              <p class="section-kicker">좌석</p>
+              <h2>선택 가능한 좌석</h2>
+            </div>
+            <div class="seat-legend">
+              <span class="legend available">선택 가능</span>
+              <span class="legend unavailable">선택 불가</span>
+              <span class="legend selected">선택됨</span>
+            </div>
+          </div>
+          <div id="seatGrid" class="seat-grid">
+            <article class="seat-placeholder">좌석을 불러오세요.</article>
+          </div>
+        </section>
+      </section>
+
+      <aside class="card sidebar">
+        <div class="section-head">
+          <div>
+            <p class="section-kicker">선택</p>
+            <h2>선택한 좌석</h2>
+          </div>
+        </div>
+
+        <div id="selectionPanel" class="selected-panel">
+          <p class="muted">좌석을 클릭하면 여기에 선택 내역이 표시됩니다.</p>
+        </div>
+
+        <section class="mini-panel">
+          <div class="mini-head">
+            <h3>예약 상태</h3>
+            <span id="selectionCount" class="chip">0</span>
+          </div>
+          <div id="resultPanel" class="result-panel">
+            <p class="muted">예약 버튼을 누르면 결과가 표시됩니다.</p>
+          </div>
+        </section>
+      </aside>
+    </section>
+  </main>
+
+  <div id="toast" class="toast" aria-live="polite"></div>
+
+  <script src="/auth.js"></script>
+  <script src="/reservation.js"></script>
+</body>
+</html>

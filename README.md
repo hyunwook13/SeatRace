@@ -116,11 +116,16 @@ curl -X POST http://localhost:8080/login \
 
 ## 9) API 문서 및 모니터링
 
+- 실험용 API 프론트: `http://localhost:8080/`
+- 로그인: `http://localhost:8080/login.html`
+- 회원가입: `http://localhost:8080/signup.html`
+- 예약하기: `http://localhost:8080/reservation.html`
 - Swagger UI: `http://localhost:8080/swagger-ui/index.html`
 - OpenAPI JSON: `http://localhost:8080/v3/api-docs`
 - Health 체크: `http://localhost:8080/health`
 - Actuator Health: `http://localhost:8080/actuator/health`
 - Prometheus 메트릭: `http://localhost:8080/actuator/prometheus`
+- Grafana 대시보드: `http://localhost:3000` (기본 계정 `admin/admin`)
 
 ## 10) 프로젝트 구조
 
@@ -141,5 +146,7 @@ src/main/java/org/example/seatrace
 
 - 좌석 홀드 TTL 기본값은 `reservation.hold.ttl-seconds=10` 입니다.
 - 홀드 정리 스케줄러는 `reservation.hold.cleanup-delay-ms=3000` 주기로 동작합니다.
+- 프론트에서 로그인할 때는 `user / 1234`, `admin / 1234` 또는 가입한 계정을 사용하면 됩니다.
+- `GET /api/events` 는 인증 없이 조회 가능하고, `GET /api/events/{eventId}/seats` 부터는 JWT가 필요합니다.
 - `docker-compose.yml`의 `app.environment`에 `DB_URL` 키가 있으나, 애플리케이션은 `SPRING_DATASOURCE_URL`을 사용합니다.
   - 컨테이너에서 DB URL을 명시하려면 `SPRING_DATASOURCE_URL=jdbc:postgresql://postgres:5432/seatrace`를 사용하세요.

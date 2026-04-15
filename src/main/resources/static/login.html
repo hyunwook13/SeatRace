@@ -1,0 +1,49 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>SeatRace Login</title>
+  <link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+  <div class="ambient ambient-a"></div>
+  <div class="ambient ambient-b"></div>
+
+  <main class="auth-shell">
+    <section class="auth-card card">
+      <div class="auth-copy">
+        <p class="eyebrow">SeatRace</p>
+        <h1>로그인</h1>
+        <p class="lede">
+          JWT를 발급받아 API 실험 화면으로 이동합니다.
+        </p>
+        <div class="auth-links">
+          <a href="/">API Lab</a>
+          <a id="signupLink" href="/signup.html">회원가입</a>
+        </div>
+      </div>
+
+      <form id="loginForm" class="auth-form panel">
+        <div class="status-card compact">
+          <span class="status-label">Current User</span>
+          <strong id="authState">미로그인</strong>
+        </div>
+        <label>
+          이메일
+          <input name="username" value="user" autocomplete="username">
+        </label>
+        <label>
+          비밀번호
+          <input name="password" type="password" value="1234" autocomplete="current-password">
+        </label>
+        <button type="submit">로그인</button>
+        <p class="form-note">로그인 후 메인 API 화면으로 이동합니다.</p>
+      </form>
+    </section>
+  </main>
+
+  <script src="/auth.js"></script>
+  <script src="/login.js"></script>
+</body>
+</html>
