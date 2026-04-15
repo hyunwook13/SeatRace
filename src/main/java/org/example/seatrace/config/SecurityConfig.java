@@ -52,10 +52,12 @@ public class SecurityConfig {
             .failureHandler(restAuthenticationFailureHandler)
         )
         .authorizeHttpRequests(auth -> auth
+            .requestMatchers("/actuator/**").permitAll()
             .requestMatchers("/swagger-ui.html", "/swagger-ui/**", "/v3/api-docs/**").permitAll()
             .requestMatchers("/api/admin/**").hasRole("ADMIN")
-            .requestMatchers(HttpMethod.GET, "/api/posts/**").permitAll()
-            .requestMatchers("/api/posts/**").authenticated()
+            .requestMatchers(HttpMethod.GET, "/api/events").permitAll()
+            .requestMatchers("/api/events/**").authenticated()
+            .requestMatchers("/api/reservations/**").authenticated()
             .anyRequest().permitAll()
         )
         .sessionManagement(session -> session
