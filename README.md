@@ -146,7 +146,25 @@ src/main/java/org/example/seatrace
 
 - 좌석 홀드 TTL 기본값은 `reservation.hold.ttl-seconds=10` 입니다.
 - 홀드 정리 스케줄러는 `reservation.hold.cleanup-delay-ms=3000` 주기로 동작합니다.
+- 초고부하에서 DB 락 경합/커넥션 고갈을 줄이기 위해 좌석 선점(hold)과 예약 상태 변경에 Redis 분산락(Redisson)을 사용합니다.
+  - 키: `lock:seat:{eventId}:{seatId}`, `lock:reservation:{reservationId}`
+  - 설정: `reservation.lock.*` (`RESERVATION_LOCK_*` 환경변수로 오버라이드 가능)
 - 프론트에서 로그인할 때는 `user / 1234`, `admin / 1234` 또는 가입한 계정을 사용하면 됩니다.
 - `GET /api/events` 는 인증 없이 조회 가능하고, `GET /api/events/{eventId}/seats` 부터는 JWT가 필요합니다.
 - `docker-compose.yml`의 `app.environment`에 `DB_URL` 키가 있으나, 애플리케이션은 `SPRING_DATASOURCE_URL`을 사용합니다.
   - 컨테이너에서 DB URL을 명시하려면 `SPRING_DATASOURCE_URL=jdbc:postgresql://postgres:5432/seatrace`를 사용하세요.
+
+### 부하 테스트 스크립트
+
+Prometheus/Grafana를 함께 띄운 상태에서(또는 스크립트가 자동으로 띄움) 아래 스크립트로 수치를 뽑을 수 있습니다.
+
+```bash
+# (A) 분산락 ON/OFF에 따른 Hikari 커넥션풀 압력 비교
+EVENT_ID=1 SEAT_ID=1 RPS=100 DURATION=10s PROM_WINDOW=30s ./tools/run-lock-hikari-compare.sh
+
+# (B) CQRS(조회/쓰기 부하 격리) 비교: 조회 부하 + 쓰기 버스트
+EVENT_ID=1 SEAT_ID_FROM=1 SEAT_ID_TO=100 READ_RPS=500 WRITE_RPS=100 DURATION=30s WRITE_START=10s WRITE_DURATION=10s PROM_WINDOW=30s ./tools/run-cqrs-isolation-compare.sh
+```
+
+- (A)는 Prometheus의 `hikaricp_connections_*` 지표로 `active/pending/timeout` 피크를 비교합니다.
+- (B)는 k6 요약(`CQRS Isolation Summary`)의 `read_p95`, `write_p95`, `write_ok_rate`와 함께 `seat_db_load_inc_*`(좌석 조회가 DB를 얼마나 때렸는지)까지 같이 확인합니다.
