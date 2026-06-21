@@ -66,7 +66,8 @@ public class ReservationHoldStreamService {
           .description("Failed to enqueue hold expiration entry to Redis Stream")
           .register(meterRegistry)
           .increment();
-      log.error("홀드 만료 스트림 enqueue 실패: reservationId={}, expiresAtMillis={}",
+      // afterCommit best-effort: hold 응답은 이미 성공했고, 만료는 스케줄러/Redis TTL 폴백으로 처리된다.
+      log.warn("홀드 만료 스트림 enqueue 실패(best-effort): reservationId={}, expiresAtMillis={}",
           reservationId, expiresAtMillis, lastException);
     }
   }

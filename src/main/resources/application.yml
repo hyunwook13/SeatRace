@@ -10,6 +10,11 @@ spring:
     redis:
       host: ${REDIS_HOST:localhost}
       port: ${REDIS_PORT:6379}
+      # Redis는 옵션(부가기능)이라 장애 시 빠르게 실패(fail-fast)해서 로컬/DB 폴백으로 넘어가야 한다.
+      # - timeout: Redis 명령(READ/WRITE) 타임아웃
+      # - connect-timeout: 소켓 연결 타임아웃
+      timeout: ${SPRING_DATA_REDIS_TIMEOUT:100ms}
+      connect-timeout: ${SPRING_DATA_REDIS_CONNECT_TIMEOUT:100ms}
 
 server:
   servlet:
@@ -27,13 +32,23 @@ reservation:
     ttl-seconds: 10
     cleanup-delay-ms: 3000
     stream-batch-size: 200
+  lock:
+    enabled: ${RESERVATION_LOCK_ENABLED:true}
+    wait-ms: ${RESERVATION_LOCK_WAIT_MS:50}
+    lease-ms: ${RESERVATION_LOCK_LEASE_MS:3000}
+    required: ${RESERVATION_LOCK_REQUIRED:false}
 
 virtual-queue:
-  enabled: true
-  tps: 500
-  active-limit: 2000
-  active-ttl-seconds: 60
-  max-advance-per-call: 50
+  enabled: ${VIRTUAL_QUEUE_ENABLED:true}
+  tps: ${VIRTUAL_QUEUE_TPS:500}
+  active-limit: ${VIRTUAL_QUEUE_ACTIVE_LIMIT:2000}
+  active-ttl-seconds: ${VIRTUAL_QUEUE_ACTIVE_TTL_SECONDS:60}
+  max-advance-per-call: ${VIRTUAL_QUEUE_MAX_ADVANCE_PER_CALL:50}
+  advance-delay-ms: ${VIRTUAL_QUEUE_ADVANCE_DELAY_MS:200}
+event-seat:
+  cache:
+    local-ttl-ms: 300000
+    redis-ttl-seconds: 300
 
 # --- 모니터링 설정 보강 시작 ---
 management:
@@ -88,3 +103,29 @@ resilience4j:
         failure-rate-threshold: 50
         wait-duration-in-open-state: 10s
         permitted-number-of-calls-in-half-open-state: 3
+      redisCore:
+        sliding-window-type: COUNT_BASED
+        sliding-window-size: 50
+        minimum-number-of-calls: 20
+        failure-rate-threshold: 50
+        slow-call-duration-threshold: 300ms
+        slow-call-rate-threshold: 80
+        wait-duration-in-open-state: 3s
+        permitted-number-of-calls-in-half-open-state: 5
+      seatCache:
+        sliding-window-type: COUNT_BASED
+        sliding-window-size: 10
+        failure-rate-threshold: 10
+        slow-call-duration-threshold: 500ms
+        slow-call-rate-threshold: 50
+        wait-duration-in-open-state: 10s
+        permitted-number-of-calls-in-half-open-state: 3
+  bulkhead:
+    instances:
+      redisCore:
+        max-concurrent-calls: 50
+        max-wait-duration: 0
+
+logging:
+  level:
+    com.zaxxer.hikari: ${LOG_LEVEL_HIKARI:INFO}

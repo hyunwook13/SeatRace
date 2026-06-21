@@ -11,6 +11,8 @@ public record QueueStatusResponse(
     long waitCount,
     int tps,
     int activeLimit,
-    long estimatedWaitMillis
+    long estimatedWaitMillis,
+    String admissionToken,
+    long admissionExpiresAtMillis
 ) {
 }

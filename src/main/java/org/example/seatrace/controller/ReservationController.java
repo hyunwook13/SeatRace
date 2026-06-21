@@ -23,6 +23,7 @@ import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
+import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
@@ -52,11 +53,11 @@ public class ReservationController {
   public ResponseEntity<?> holdSeats(
       @PathVariable Long eventId,
       @AuthenticationPrincipal CustomUserPrincipal principal,
+      @RequestHeader(value = "X-Queue-Token", required = false) String queueToken,
       @RequestBody HoldSeatRequest request
   ) {
-    QueueEnterResponse queue = virtualQueueService.enterOrWait(eventId, principal.getUserId());
-    if (!queue.admitted()) {
-      return ResponseEntity.status(429).body(queue);
+    if (!virtualQueueService.isAdmitted(eventId, principal.getUserId(), queueToken)) {
+      return ResponseEntity.status(429).body(virtualQueueService.notAdmittedResponse(eventId));
     }
     return ResponseEntity.ok(
         reservationService.holdSeats(principal.getUserId(), eventId, request)

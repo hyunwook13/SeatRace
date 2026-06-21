@@ -39,6 +39,7 @@ dependencies {
     implementation 'org.springframework.boot:spring-boot-starter-aop'
     implementation platform('io.github.resilience4j:resilience4j-bom:2.2.0')
     implementation 'io.github.resilience4j:resilience4j-spring-boot3'
+    implementation 'org.redisson:redisson:3.27.2'
 
     runtimeOnly 'org.postgresql:postgresql'
     runtimeOnly 'com.h2database:h2'

@@ -16,4 +16,5 @@ public class VirtualQueueProperties {
   private int activeLimit = 2000;
   private int activeTtlSeconds = 60;
   private int maxAdvancePerCall = 50;
+  private long advanceDelayMs = 200;
 }

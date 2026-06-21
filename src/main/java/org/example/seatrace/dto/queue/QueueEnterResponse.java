@@ -10,6 +10,8 @@ public record QueueEnterResponse(
     long waitCount,
     int tps,
     int activeLimit,
-    long estimatedWaitMillis
+    long estimatedWaitMillis,
+    String admissionToken,
+    long admissionExpiresAtMillis
 ) {
 }

@@ -5,6 +5,7 @@ const state = {
   seats: [],
   selectedSeatIds: [],
   queue: null,
+  queueTokens: {},
   holdResult: null,
 };
 
@@ -91,7 +92,7 @@ async function loadSeats() {
   }
 
   const response = await fetch(`/api/events/${event.id}/seats`, {
-    headers: getAuthHeaders(),
+    headers: getAuthHeaders(queueTokenHeaders(event.id)),
   });
 
   if (response.ok) {
@@ -154,8 +155,16 @@ async function enterQueue() {
   }
 
   state.queue = await response.json();
+  rememberQueueToken(event.id, state.queue);
   showToastMessage('대기열에 진입했습니다.');
-  await loadSeats();
+  if (!state.queue.admitted) {
+    await pollQueueUntilAdmitted(event.id);
+  }
+  if (getQueueToken(event.id)) {
+    await loadSeats();
+  } else {
+    renderResultPanel();
+  }
 }
 
 async function reserveSelectedSeats() {
@@ -176,6 +185,7 @@ async function reserveSelectedSeats() {
 
   const response = await request(`/api/events/${event.id}/holds`, {
     method: 'POST',
+    headers: queueTokenHeaders(event.id),
     body: JSON.stringify({ seatIds: state.selectedSeatIds }),
   });
 
@@ -358,6 +368,10 @@ function selectEvent(eventId, silent = false) {
   state.selectedSeatIds = [];
   state.queue = null;
   state.holdResult = null;
+  const cachedToken = loadQueueToken(eventId);
+  if (cachedToken) {
+    state.queueTokens[eventId] = cachedToken;
+  }
   renderEventHeader();
   renderSeatGrid();
   renderSelectionPanel();
@@ -488,6 +502,77 @@ async function request(path, options = {}) {
     ...options,
     headers,
   });
+}
+
+function queueTokenHeaders(eventId) {
+  const token = getQueueToken(eventId);
+  return token ? { 'X-Queue-Token': token } : {};
+}
+
+function rememberQueueToken(eventId, queue) {
+  if (!queue?.admissionToken) {
+    return;
+  }
+  state.queueTokens[eventId] = queue.admissionToken;
+  const expiresAt = Number(queue.admissionExpiresAtMillis || 0);
+  localStorage.setItem(queueTokenStorageKey(eventId), JSON.stringify({
+    token: queue.admissionToken,
+    expiresAt,
+  }));
+}
+
+function getQueueToken(eventId) {
+  if (state.queueTokens[eventId]) {
+    return state.queueTokens[eventId];
+  }
+  const token = loadQueueToken(eventId);
+  if (token) {
+    state.queueTokens[eventId] = token;
+  }
+  return token;
+}
+
+function loadQueueToken(eventId) {
+  try {
+    const raw = localStorage.getItem(queueTokenStorageKey(eventId));
+    if (!raw) {
+      return '';
+    }
+    const parsed = JSON.parse(raw);
+    if (!parsed.token || Number(parsed.expiresAt || 0) <= Date.now()) {
+      localStorage.removeItem(queueTokenStorageKey(eventId));
+      return '';
+    }
+    return parsed.token;
+  } catch {
+    localStorage.removeItem(queueTokenStorageKey(eventId));
+    return '';
+  }
+}
+
+function queueTokenStorageKey(eventId) {
+  return `seatrace.queueToken.${eventId}`;
+}
+
+async function pollQueueUntilAdmitted(eventId) {
+  for (let i = 0; i < 10; i += 1) {
+    await sleep(300);
+    const response = await request(`/api/events/${eventId}/queue/status`, {
+      method: 'GET',
+    });
+    if (!response.ok) {
+      return;
+    }
+    state.queue = await response.json();
+    rememberQueueToken(eventId, state.queue);
+    if (state.queue.admitted && state.queue.admissionToken) {
+      return;
+    }
+  }
+}
+
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 async function safeJson(response) {
