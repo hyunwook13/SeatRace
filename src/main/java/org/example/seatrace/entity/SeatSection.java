@@ -16,28 +16,24 @@ import lombok.NoArgsConstructor;
 
 @Entity
 @Getter
-@Table(name = "seats")
+@Table(name = "seat_sections")
 @NoArgsConstructor(access = AccessLevel.PROTECTED)
-public class Seat extends BaseEntity {
+public class SeatSection extends BaseEntity {
 
   @Id
   @GeneratedValue(strategy = GenerationType.IDENTITY)
   private Long id;
 
   @ManyToOne(fetch = FetchType.LAZY, optional = false)
-  @JoinColumn(name = "seat_section_id", nullable = false)
-  private SeatSection seatSection;
+  @JoinColumn(name = "venue_id", nullable = false)
+  private Venue venue;
 
-  @Column(name = "row_no", nullable = false, length = 10)
-  private String seatRow;
-
-  @Column(name = "seat_number", nullable = false)
-  private Integer seatNumber;
+  @Column(nullable = false, length = 50)
+  private String name;
 
   @Builder
-  public Seat(SeatSection seatSection, String seatRow, Integer seatNumber) {
-    this.seatSection = seatSection;
-    this.seatRow = seatRow;
-    this.seatNumber = seatNumber;
+  public SeatSection(Venue venue, String name) {
+    this.venue = venue;
+    this.name = name;
   }
 }

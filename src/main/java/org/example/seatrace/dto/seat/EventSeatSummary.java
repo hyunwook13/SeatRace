@@ -15,6 +15,7 @@ public class EventSeatSummary {
   private final String rowNo;
   private final String seatNo;
   private final String grade;
+  private final Long price;
   private final EventSeatStatus status;
   private final LocalDateTime heldUntil;
 
@@ -25,6 +26,7 @@ public class EventSeatSummary {
       @JsonProperty("rowNo") String rowNo,
       @JsonProperty("seatNo") String seatNo,
       @JsonProperty("grade") String grade,
+      @JsonProperty("price") Long price,
       @JsonProperty("status") EventSeatStatus status,
       @JsonProperty("heldUntil") LocalDateTime heldUntil
   ) {
@@ -33,13 +35,19 @@ public class EventSeatSummary {
     this.rowNo = rowNo;
     this.seatNo = seatNo;
     this.grade = grade;
+    this.price = price;
     this.status = status;
     this.heldUntil = heldUntil;
   }
 
   public static EventSeatSummary from(EventSeat seat) {
-    return new EventSeatSummary(seat.getSeat().getId(), seat.getSeat().getSection(),
-        seat.getSeat().getRowNo(), seat.getSeat().getSeatNo(), seat.getSeat().getGrade(),
-        seat.getStatus(), seat.getHeldUntil());
+    Long price = seat.getPrice();
+    String grade = seat.getGrade() != null ? seat.getGrade().name() : null;
+
+    return new EventSeatSummary(seat.getSeat().getId(),
+        seat.getSeat().getSeatSection().getName(),
+        seat.getSeat().getSeatRow(),
+        String.valueOf(seat.getSeat().getSeatNumber()), grade, price, seat.getStatus(),
+        seat.getHeldUntil());
   }
 }

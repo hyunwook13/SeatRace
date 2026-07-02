@@ -349,6 +349,25 @@ button {
   font-size: 1.04rem;
 }
 
+.admin-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 16px;
+}
+
+.admin-log {
+  min-height: 420px;
+  margin: 0;
+  padding: 16px;
+  border-radius: 18px;
+  background: rgba(5, 10, 18, 0.92);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  color: var(--text);
+  overflow: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
 label {
   display: grid;
   gap: 8px;
@@ -594,6 +613,85 @@ button[type="submit"],
   gap: 12px;
 }
 
+.payment-panel {
+  padding: 18px;
+  border-radius: 18px;
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.field-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.field {
+  display: grid;
+  gap: 8px;
+}
+
+.field span {
+  font-size: 12px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.field input {
+  width: 100%;
+  border-radius: 14px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  background: rgba(5, 10, 18, 0.92);
+  color: var(--text);
+  padding: 12px 14px;
+  font: inherit;
+}
+
+.field input:focus {
+  outline: 2px solid rgba(122, 167, 255, 0.42);
+  outline-offset: 1px;
+}
+
+.payment-summary {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.payment-summary-wide {
+  grid-column: 1 / -1;
+}
+
+.payment-summary > div {
+  padding: 14px;
+  border-radius: 18px;
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.payment-summary span {
+  display: block;
+  color: var(--muted);
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+}
+
+.payment-summary strong {
+  display: block;
+  margin-top: 8px;
+  font-size: 1.15rem;
+}
+
+.payment-widget-box {
+  min-height: 96px;
+  display: grid;
+  gap: 12px;
+  padding: 16px;
+  border-radius: 18px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(10, 18, 31, 0.9);
+}
+
 .mini-head {
   display: flex;
   justify-content: space-between;
@@ -771,6 +869,11 @@ button[type="submit"],
 .seat-grade {
   font-size: 12px;
   color: var(--warning);
+}
+
+.seat-price {
+  font-size: 12px;
+  color: #9ff0d2;
 }
 
 .seat-placeholder {
@@ -995,6 +1098,15 @@ button[type="submit"],
   }
 
   .selected-stats {
+    grid-template-columns: 1fr;
+  }
+
+  .field-grid,
+  .payment-summary {
+    grid-template-columns: 1fr;
+  }
+
+  .admin-grid {
     grid-template-columns: 1fr;
   }
 }

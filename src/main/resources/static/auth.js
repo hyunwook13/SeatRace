@@ -52,10 +52,12 @@ function renderAuthSummary(target) {
   }
 
   if (!token) {
-    target.textContent = '미로그인';
+    target.textContent = '';
+    target.hidden = true;
     return;
   }
 
+  target.hidden = false;
   target.textContent = user
     ? `${user.name || user.email || 'user'} (#${user.id || '?'})`
     : '로그인됨';

@@ -14,6 +14,8 @@ public interface EventSeatRepository extends JpaRepository<EventSeat, Long> {
 
   List<EventSeat> findAllByEvent(Event event);
 
+  List<EventSeat> findAllByEventId(Long eventId);
+
   Optional<EventSeat> findByEventIdAndSeatId(Long eventId, Long seatId);
 
 

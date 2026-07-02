@@ -7,6 +7,16 @@ const state = {
   queue: null,
   queueTokens: {},
   holdResult: null,
+  payment: {
+    visible: false,
+    reservationId: null,
+    orderId: null,
+    amount: 0,
+    selectedSeats: [],
+    orderName: '',
+    widget: null,
+    ready: false,
+  },
 };
 
 const els = {
@@ -27,10 +37,28 @@ const els = {
   selectionPanel: document.getElementById('selectionPanel'),
   resultPanel: document.getElementById('resultPanel'),
   selectionCount: document.getElementById('selectionCount'),
+  paymentPanel: document.getElementById('paymentPanel'),
+  paymentStatus: document.getElementById('paymentStatus'),
+  tossClientKey: document.getElementById('tossClientKey'),
+  tossCustomerKey: document.getElementById('tossCustomerKey'),
+  savePaymentConfigBtn: document.getElementById('savePaymentConfigBtn'),
+  renderPaymentWidgetBtn: document.getElementById('renderPaymentWidgetBtn'),
+  requestPaymentBtn: document.getElementById('requestPaymentBtn'),
+  paymentReservationId: document.getElementById('paymentReservationId'),
+  paymentOrderId: document.getElementById('paymentOrderId'),
+  paymentAmount: document.getElementById('paymentAmount'),
+  paymentOrderName: document.getElementById('paymentOrderName'),
+  paymentMethods: document.getElementById('paymentMethods'),
+  paymentAgreement: document.getElementById('paymentAgreement'),
+  paymentHelp: document.getElementById('paymentHelp'),
   toast: document.getElementById('toast'),
 };
 
 const urlState = readUrlState();
+const PAYMENT_CLIENT_KEY_STORAGE = 'seatrace.toss.clientKey';
+const PAYMENT_CUSTOMER_KEY_STORAGE = 'seatrace.toss.customerKey';
+const DEFAULT_TOSS_CLIENT_KEY = 'test_gck_docs_Ovk5rk1EwkEbP0W43n07xlzm';
+const DEFAULT_TOSS_CUSTOMER_KEY = '1PRL2nXo-0HlPu-c1A92b';
 let toastTimer = null;
 
 bootstrap();
@@ -38,6 +66,8 @@ bootstrap();
 async function bootstrap() {
   bindEvents();
   updateAuthUi();
+  loadPaymentConfig();
+  renderPaymentPanel();
 
   if (!state.token) {
     redirectToLogin(currentReservationUrl());
@@ -53,6 +83,9 @@ function bindEvents() {
   els.loadSeatsBtn.addEventListener('click', () => loadSeats());
   els.queueBtn.addEventListener('click', () => enterQueue());
   els.reserveBtn.addEventListener('click', () => reserveSelectedSeats());
+  els.savePaymentConfigBtn.addEventListener('click', () => savePaymentConfig());
+  els.renderPaymentWidgetBtn.addEventListener('click', () => renderPaymentWidget());
+  els.requestPaymentBtn.addEventListener('click', () => requestPayment());
   els.logoutBtn.addEventListener('click', logout);
 }
 
@@ -191,11 +224,31 @@ async function reserveSelectedSeats() {
 
   if (response.ok) {
     state.holdResult = await response.json();
+    const selectedSeats = state.seats.filter((seat) => state.selectedSeatIds.includes(seat.seatId));
+    const totalAmount = selectedSeats.reduce((sum, seat) => sum + Number(seat.price || 0), 0);
+    state.payment = {
+      visible: true,
+      reservationId: state.holdResult.reservationId,
+      orderId: null,
+      amount: totalAmount,
+      selectedSeats,
+      orderName: buildPaymentOrderName(event, selectedSeats),
+      widget: null,
+      ready: false,
+    };
     state.selectedSeatIds = [];
     state.queue = null;
     renderSeatGrid();
     renderSelectionPanel();
     renderResultPanel();
+    renderPaymentPanel();
+    try {
+      await createPaymentOrder();
+      await renderPaymentWidget();
+    } catch (paymentError) {
+      els.paymentHelp.textContent = `결제 준비 실패: ${paymentError?.message || paymentError}`;
+      showToastMessage('결제 준비에 실패했습니다.');
+    }
     showToastMessage('예약 요청이 완료되었습니다.');
     return;
   }
@@ -276,6 +329,7 @@ function renderSeatGrid() {
         <span class="seat-code">${escapeHtml(seat.section || 'S')} ${escapeHtml(seat.rowNo || '-')}-${escapeHtml(seat.seatNo || '-')}</span>
         <strong class="seat-number">${escapeHtml(String(seat.seatId))}</strong>
         <span class="seat-grade">${escapeHtml(seat.grade || '')}</span>
+        <span class="seat-price">${formatCurrency(seat.price)}</span>
       </button>
     `;
   }).join('');
@@ -295,6 +349,8 @@ function renderSelectionPanel() {
     return;
   }
 
+  const totalAmount = selectedSeats.reduce((sum, seat) => sum + Number(seat.price || 0), 0);
+
   els.selectionPanel.innerHTML = `
     <div class="seat-summary">
       <div class="mini-head">
@@ -305,6 +361,12 @@ function renderSelectionPanel() {
         ${selectedSeats.map((seat) => `
           <span class="seat-pill selected">${escapeHtml(seat.section || 'S')} ${escapeHtml(seat.rowNo || '-')}-${escapeHtml(seat.seatNo || '-')}</span>
         `).join('')}
+      </div>
+      <div class="selected-stats compact">
+        <div>
+          <span>총액</span>
+          <strong>${formatCurrency(totalAmount)}</strong>
+        </div>
       </div>
     </div>
   `;
@@ -346,6 +408,216 @@ function renderResultPanel() {
   els.resultPanel.innerHTML = '<p class="muted">예약 버튼을 누르면 결과가 표시됩니다.</p>';
 }
 
+function renderPaymentPanel() {
+  if (!els.paymentPanel) {
+    return;
+  }
+
+  if (!state.payment.visible || !state.payment.reservationId) {
+    els.paymentPanel.classList.add('hidden');
+    clearPaymentContainers();
+    return;
+  }
+
+  els.paymentPanel.classList.remove('hidden');
+  els.paymentStatus.textContent = state.payment.ready ? '렌더됨' : '대기';
+  els.paymentStatus.className = `chip ${state.payment.ready ? 'ok' : 'warn'}`;
+  els.paymentReservationId.textContent = String(state.payment.reservationId);
+  if (els.paymentOrderId) {
+    els.paymentOrderId.textContent = state.payment.orderId || '-';
+  }
+  els.paymentAmount.textContent = formatCurrency(state.payment.amount);
+  if (els.paymentOrderName) {
+    els.paymentOrderName.textContent = state.payment.orderName || '-';
+  }
+  if (els.requestPaymentBtn) {
+    els.requestPaymentBtn.disabled = !state.payment.ready;
+  }
+  els.paymentHelp.textContent = state.payment.ready
+    ? '결제 위젯이 렌더되었습니다. 이제 결제하기를 누르면 Toss 결제창이 열립니다.'
+    : '클라이언트 키를 입력한 뒤 결제 위젯 렌더 버튼을 누르세요.';
+
+  if (els.tossClientKey && !els.tossClientKey.value) {
+    els.tossClientKey.value = loadPaymentConfigValue(PAYMENT_CLIENT_KEY_STORAGE) || DEFAULT_TOSS_CLIENT_KEY;
+  }
+  if (els.tossCustomerKey && !els.tossCustomerKey.value) {
+    els.tossCustomerKey.value = loadPaymentConfigValue(PAYMENT_CUSTOMER_KEY_STORAGE) || defaultCustomerKey() || DEFAULT_TOSS_CUSTOMER_KEY;
+  }
+}
+
+function savePaymentConfig() {
+  if (els.tossClientKey) {
+    localStorage.setItem(PAYMENT_CLIENT_KEY_STORAGE, els.tossClientKey.value.trim());
+  }
+  if (els.tossCustomerKey) {
+    localStorage.setItem(PAYMENT_CUSTOMER_KEY_STORAGE, els.tossCustomerKey.value.trim());
+  }
+  showToastMessage('결제 설정을 저장했습니다.');
+}
+
+async function renderPaymentWidget() {
+  if (!state.payment.visible || !state.payment.reservationId) {
+    showToastMessage('먼저 예약을 완료하세요.');
+    return;
+  }
+
+  if (!state.payment.orderId) {
+    await createPaymentOrder();
+  }
+
+  const clientKey = getPaymentConfigValue(PAYMENT_CLIENT_KEY_STORAGE, els.tossClientKey?.value) || DEFAULT_TOSS_CLIENT_KEY;
+  const customerKey = getPaymentConfigValue(PAYMENT_CUSTOMER_KEY_STORAGE, els.tossCustomerKey?.value) || defaultCustomerKey() || DEFAULT_TOSS_CUSTOMER_KEY;
+  if (!clientKey) {
+    showToastMessage('Toss 클라이언트 키가 필요합니다.');
+    return;
+  }
+
+  if (typeof window.TossPayments !== 'function') {
+    showToastMessage('Toss Payments SDK를 불러오지 못했습니다.');
+    return;
+  }
+
+  try {
+    clearPaymentContainers();
+    const tossPayments = TossPayments(clientKey);
+    const paymentWidget = tossPayments.widgets({
+      customerKey,
+    });
+    const amount = Number(state.payment.amount || 0);
+    await paymentWidget.setAmount({
+      currency: 'KRW',
+      value: amount,
+    });
+    await Promise.all([
+      paymentWidget.renderPaymentMethods({
+        selector: '#paymentMethods',
+        variantKey: 'DEFAULT',
+      }),
+      paymentWidget.renderAgreement({
+        selector: '#paymentAgreement',
+        variantKey: 'AGREEMENT',
+      }),
+    ]);
+
+    state.payment.widget = paymentWidget;
+    state.payment.ready = true;
+    renderPaymentPanel();
+    showToastMessage('결제 위젯을 렌더했습니다.');
+  } catch (error) {
+    state.payment.ready = false;
+    renderPaymentPanel();
+    els.paymentHelp.textContent = `결제 위젯 렌더 실패: ${error?.message || error}`;
+    showToastMessage('결제 위젯 렌더에 실패했습니다.');
+  }
+}
+
+async function requestPayment() {
+  try {
+    if (!state.payment.visible || !state.payment.reservationId) {
+      showToastMessage('먼저 예약을 완료하세요.');
+      return;
+    }
+
+    if (!state.payment.widget || !state.payment.ready) {
+      await renderPaymentWidget();
+    }
+
+    const widgets = state.payment.widget;
+    if (!widgets || typeof widgets.requestPayment !== 'function') {
+      throw new Error('결제 위젯이 아직 준비되지 않았습니다.');
+    }
+
+    await widgets.requestPayment({
+      orderId: state.payment.orderId,
+      orderName: state.payment.orderName || 'SeatRace reservation',
+      successUrl: buildPaymentReturnUrl('/success.html'),
+      failUrl: buildPaymentReturnUrl('/fail.html'),
+      customerEmail: state.user?.email || 'customer@example.com',
+      customerName: state.user?.name || state.user?.email || 'SeatRace User',
+      customerMobilePhone: state.user?.phone || '01012341234',
+    });
+  } catch (error) {
+    const message = error?.message || String(error);
+    els.paymentHelp.textContent = `결제 요청 실패: ${message}`;
+    showToastMessage('결제 요청에 실패했습니다.');
+    console.error('[payment] requestPayment failed:', error);
+  }
+}
+
+async function createPaymentOrder() {
+  if (!state.payment.visible || !state.payment.reservationId) {
+    return null;
+  }
+
+  const response = await request(`/api/payments/reservations/${state.payment.reservationId}/orders`, {
+    method: 'POST',
+  });
+
+  if (!response.ok) {
+    const error = await safeJson(response);
+    throw new Error(error?.message || `HTTP ${response.status}`);
+  }
+
+  const data = await response.json();
+  state.payment.orderId = data.orderId;
+  state.payment.amount = Number(data.amount || state.payment.amount || 0);
+  state.payment.orderName = data.orderName || state.payment.orderName;
+  renderPaymentPanel();
+  return data;
+}
+
+function clearPaymentContainers() {
+  if (els.paymentMethods) {
+    els.paymentMethods.innerHTML = '';
+  }
+  if (els.paymentAgreement) {
+    els.paymentAgreement.innerHTML = '';
+  }
+}
+
+function buildPaymentOrderName(event, selectedSeats) {
+  const eventName = event?.name || `Event ${event?.id || '-'}`;
+  const seatCount = selectedSeats.length;
+  return `${eventName} 좌석 ${seatCount}매`;
+}
+
+function formatCurrency(value) {
+  return `${Number(value || 0).toLocaleString('ko-KR')}원`;
+}
+
+function loadPaymentConfig() {
+  if (els.tossClientKey) {
+    els.tossClientKey.value = loadPaymentConfigValue(PAYMENT_CLIENT_KEY_STORAGE);
+  }
+  if (els.tossCustomerKey) {
+    els.tossCustomerKey.value = loadPaymentConfigValue(PAYMENT_CUSTOMER_KEY_STORAGE) || defaultCustomerKey();
+  }
+}
+
+function loadPaymentConfigValue(key) {
+  try {
+    return localStorage.getItem(key) || '';
+  } catch {
+    return '';
+  }
+}
+
+function getPaymentConfigValue(key, fallbackValue = '') {
+  const inputValue = String(fallbackValue || '').trim();
+  if (inputValue) {
+    return inputValue;
+  }
+  return loadPaymentConfigValue(key);
+}
+
+function defaultCustomerKey() {
+  return `seat-race-${state.user?.id || state.user?.email || 'guest'}`;
+}
+
+function buildPaymentReturnUrl(pathname) {
+  return new URL(pathname, window.location.origin).toString();
+}
+
 function toggleSeat(seatId) {
   const seat = state.seats.find((item) => item.seatId === seatId);
   if (!seat || !isSelectable(seat)) {
@@ -368,6 +640,17 @@ function selectEvent(eventId, silent = false) {
   state.selectedSeatIds = [];
   state.queue = null;
   state.holdResult = null;
+  state.payment = {
+    visible: false,
+    reservationId: null,
+    orderId: null,
+    amount: 0,
+    selectedSeats: [],
+    orderName: '',
+    widget: null,
+    ready: false,
+  };
+  clearPaymentContainers();
   const cachedToken = loadQueueToken(eventId);
   if (cachedToken) {
     state.queueTokens[eventId] = cachedToken;
@@ -376,6 +659,7 @@ function selectEvent(eventId, silent = false) {
   renderSeatGrid();
   renderSelectionPanel();
   renderResultPanel();
+  renderPaymentPanel();
   if (!silent) {
     history.replaceState({}, '', buildReservationUrl(eventId));
   }

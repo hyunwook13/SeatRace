@@ -7,11 +7,11 @@ import org.springframework.data.jpa.repository.JpaRepository;
 
 public interface SeatRepository extends JpaRepository<Seat, Long> {
 
-  Optional<Seat> findByVenueIdAndSectionAndRowNoAndSeatNo(Long venueId, String section,
-      String rowNo, String seatNo);
+  Optional<Seat> findBySeatSectionIdAndSeatRowAndSeatNumber(Long seatSectionId, String seatRow,
+      Integer seatNumber);
 
-  boolean existsByVenueIdAndSectionAndRowNoAndSeatNo(Long venueId, String section, String rowNo,
-      String seatNo);
+  boolean existsBySeatSectionIdAndSeatRowAndSeatNumber(Long seatSectionId, String seatRow,
+      Integer seatNumber);
 
-  List<Seat> findAllByVenueId(Long venueId);
+  List<Seat> findAllBySeatSectionId(Long seatSectionId);
 }

@@ -3,5 +3,6 @@ package org.example.seatrace.entity;
 public enum EventSeatStatus {
   AVAILABLE,
   HOLD,
-  RESERVED
+  RESERVED,
+  BLOCKED_BY_ADMIN
 }

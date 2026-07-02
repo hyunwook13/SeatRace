@@ -1,0 +1,23 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>결제 성공</title>
+  <link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+  <main class="shell app-shell">
+    <section class="card" style="padding:24px;">
+      <p class="eyebrow">SeatRace</p>
+      <h1 id="resultTitle">결제 승인 처리 중</h1>
+      <p id="resultMessage" class="lede">서버에서 결제 승인과 예약 확정을 확인하고 있습니다.</p>
+      <pre id="resultDetail" class="admin-log" style="white-space:pre-wrap;">잠시만 기다려주세요.</pre>
+      <a class="primary-button" href="/reservation.html">예약 화면으로 돌아가기</a>
+    </section>
+  </main>
+
+  <script src="/auth.js"></script>
+  <script src="/success.js"></script>
+</body>
+</html>

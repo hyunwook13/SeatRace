@@ -1,6 +1,8 @@
 spring:
   application:
     name: SeatRace
+  lifecycle:
+    timeout-per-shutdown-phase: 30s
   datasource:
     url: ${SPRING_DATASOURCE_URL:jdbc:postgresql://localhost:5432/seatrace}
     username: ${SPRING_DATASOURCE_USERNAME:seatrace}
@@ -17,6 +19,7 @@ spring:
       connect-timeout: ${SPRING_DATA_REDIS_CONNECT_TIMEOUT:100ms}
 
 server:
+  shutdown: graceful
   servlet:
     session:
       tracking-modes: cookie
@@ -50,18 +53,30 @@ event-seat:
     local-ttl-ms: 300000
     redis-ttl-seconds: 300
 
-# --- 모니터링 설정 보강 시작 ---
+toss-payment:
+  secret-key: ${TOSS_PAYMENT_SECRET_KEY:}
+  confirm-url: ${TOSS_PAYMENT_CONFIRM_URL:https://api.tosspayments.com/v1/payments/confirm}
+
+# --- 모니터링 및 트래픽 드레인 설정 보강 시작 ---
 management:
+  server:
+    # 💡 [핵심 보안] 외부 포트 8080과 격리된 50000번 포트에서만 액추에이터 주소들을 개방합니다.
+    # 이렇게 하면 Nginx가 포트포워딩하는 8080 포트로는 외부에서 절대 접속할 수 없습니다.
+    port: 50000
   endpoints:
     web:
       exposure:
-        include: prometheus, health, info, metrics
+        include: prometheus, health, info, metrics, shutdown # 💡 shutdown 엔드포인트 개방
   endpoint:
     prometheus:
       enabled: true
     health:
       show-details: always
+    shutdown:
+      enabled: true # 💡 shutdown 종료 기능 활성화
   health:
+    probes:
+      enabled: true
     redis:
       enabled: false
   metrics:
@@ -69,63 +84,13 @@ management:
       application: ${spring.application.name}
     distribution:
       percentiles-histogram:
-        # 모든 HTTP 요청에 대해 P95, P99 계산을 위한 히스토그램 활성화
         http.server.requests: true
         seatrace_hold_stale_cleanup_duration_seconds: true
       percentiles:
-        # 주요 구간 분위수 설정
         http.server.requests: 0.5, 0.75, 0.95, 0.99
       maximum-expected-value:
         http.server.requests: 10s
         seatrace_hold_stale_cleanup_duration_seconds: 10s
     enable:
-      # JVM 상세 지표 활성화 (메모리, 쓰레드 등)
       jvm: true
-# --- 모니터링 설정 보강 끝 ---
-
-resilience4j:
-  retry:
-    instances:
-      holdCleanup:
-        max-attempts: 3
-        wait-duration: 300ms
-        retry-exceptions:
-          - org.springframework.dao.CannotAcquireLockException
-          - org.springframework.dao.DeadlockLoserDataAccessException
-          - org.springframework.dao.QueryTimeoutException
-          - org.springframework.dao.TransientDataAccessException
-          - org.springframework.orm.ObjectOptimisticLockingFailureException
-  circuitbreaker:
-    instances:
-      holdCleanup:
-        sliding-window-type: COUNT_BASED
-        sliding-window-size: 20
-        failure-rate-threshold: 50
-        wait-duration-in-open-state: 10s
-        permitted-number-of-calls-in-half-open-state: 3
-      redisCore:
-        sliding-window-type: COUNT_BASED
-        sliding-window-size: 50
-        minimum-number-of-calls: 20
-        failure-rate-threshold: 50
-        slow-call-duration-threshold: 300ms
-        slow-call-rate-threshold: 80
-        wait-duration-in-open-state: 3s
-        permitted-number-of-calls-in-half-open-state: 5
-      seatCache:
-        sliding-window-type: COUNT_BASED
-        sliding-window-size: 10
-        failure-rate-threshold: 10
-        slow-call-duration-threshold: 500ms
-        slow-call-rate-threshold: 50
-        wait-duration-in-open-state: 10s
-        permitted-number-of-calls-in-half-open-state: 3
-  bulkhead:
-    instances:
-      redisCore:
-        max-concurrent-calls: 50
-        max-wait-duration: 0
-
-logging:
-  level:
-    com.zaxxer.hikari: ${LOG_LEVEL_HIKARI:INFO}
+# --- 모니터링 및 트래픽 드레인 설정 보강 끝 ---
