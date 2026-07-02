@@ -42,7 +42,9 @@ public class SecurityConfig {
   @Bean
   public WebSecurityCustomizer webSecurityCustomizer() {
     return (web) -> web.ignoring()
-        .requestMatchers("/actuator/**");
+        .requestMatchers("/actuator/**")
+        // 💡 Scouter 에이전트 및 내부 Jetty 수집 관련 정적 파일과 서블릿 경로를 시큐리티 필터 자체에서 완전히 무시하도록 추가
+        .requestMatchers("/scouter/**", "/scouter/api/**", "/main.html", "/favicon.ico");
   }
 
   @Bean
@@ -60,6 +62,8 @@ public class SecurityConfig {
         )
         .authorizeHttpRequests(auth -> auth
             .requestMatchers("/actuator/**").permitAll()
+            // 💡 HTTP 접근 제어 단계에서도 외부 대시보드의 Web API 바인딩 요청을 무조건 통과하도록 명시
+            .requestMatchers("/scouter/**", "/scouter/api/**", "/main.html").permitAll()
             .requestMatchers("/swagger-ui.html", "/swagger-ui/**", "/v3/api-docs/**").permitAll()
             .requestMatchers("/api/admin/**").hasRole("ADMIN")
             .requestMatchers(HttpMethod.GET, "/api/events").permitAll()
@@ -111,5 +115,4 @@ public class SecurityConfig {
       }
     };
   }
-
 }

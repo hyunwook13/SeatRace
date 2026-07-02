@@ -16,19 +16,15 @@
         <p class="eyebrow">SeatRace</p>
         <h1>로그인</h1>
         <p class="lede">
-          JWT를 발급받아 API 실험 화면으로 이동합니다.
+          JWT를 발급받아 예약 화면이나 관리자 콘솔로 이동합니다.
         </p>
         <div class="auth-links">
-          <a href="/">API Lab</a>
           <a id="signupLink" href="/signup.html">회원가입</a>
         </div>
       </div>
 
       <form id="loginForm" class="auth-form panel">
-        <div class="status-card compact">
-          <span class="status-label">Current User</span>
-          <strong id="authState">미로그인</strong>
-        </div>
+        <p id="authState" class="form-note"></p>
         <label>
           이메일
           <input name="username" value="user" autocomplete="username">

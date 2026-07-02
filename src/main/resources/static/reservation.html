@@ -81,6 +81,54 @@
             <p class="muted">예약 버튼을 누르면 결과가 표시됩니다.</p>
           </div>
         </section>
+
+        <section id="paymentPanel" class="mini-panel payment-panel hidden">
+          <div class="mini-head">
+            <h3>결제</h3>
+            <span id="paymentStatus" class="chip warn">대기</span>
+          </div>
+          <p class="muted small">
+            예약이 완료되면 여기서 Toss Payments 결제 위젯을 열어 결제 수단을 선택합니다.
+          </p>
+          <div class="field-grid">
+            <label class="field">
+              <span>Client Key</span>
+              <input id="tossClientKey" type="text" placeholder="test_ck_..." autocomplete="off">
+            </label>
+            <label class="field">
+              <span>Customer Key</span>
+              <input id="tossCustomerKey" type="text" placeholder="customer-key" autocomplete="off">
+            </label>
+          </div>
+          <div class="selected-actions">
+            <button id="savePaymentConfigBtn" class="ghost-button" type="button">키 저장</button>
+            <button id="renderPaymentWidgetBtn" class="primary-button" type="button">결제창 열기</button>
+            <button id="requestPaymentBtn" class="primary-button" type="button" disabled>결제하기</button>
+          </div>
+          <div class="payment-summary">
+            <div>
+              <span>예약 ID</span>
+              <strong id="paymentReservationId">-</strong>
+            </div>
+            <div>
+              <span>주문 ID</span>
+              <strong id="paymentOrderId">-</strong>
+            </div>
+            <div>
+              <span>결제 금액</span>
+              <strong id="paymentAmount">0원</strong>
+            </div>
+            <div class="payment-summary-wide">
+              <span>주문명</span>
+              <strong id="paymentOrderName">-</strong>
+            </div>
+          </div>
+          <div id="paymentMethods" class="payment-widget-box"></div>
+          <div id="paymentAgreement" class="payment-widget-box"></div>
+          <p id="paymentHelp" class="muted small">
+            결제창을 열려면 Toss Payments 클라이언트 키가 필요합니다. 키가 없으면 테스트 키를 사용합니다.
+          </p>
+        </section>
       </aside>
     </section>
   </main>
@@ -88,6 +136,7 @@
   <div id="toast" class="toast" aria-live="polite"></div>
 
   <script src="/auth.js"></script>
+  <script src="https://js.tosspayments.com/v2/standard"></script>
   <script src="/reservation.js"></script>
 </body>
 </html>

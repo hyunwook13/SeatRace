@@ -1,0 +1,173 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>SeatRace Admin</title>
+  <link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+  <div class="ambient ambient-a"></div>
+  <div class="ambient ambient-b"></div>
+
+  <main class="shell app-shell">
+    <header class="topbar card">
+      <div>
+        <p class="eyebrow">SeatRace</p>
+        <h1>관리자 콘솔</h1>
+        <p class="topbar-copy">어드민 계정으로 공연장, 이벤트, 좌석을 직접 관리합니다.</p>
+      </div>
+      <div class="topbar-actions">
+        <span id="userState" class="user-pill"></span>
+        <a class="ghost-button" href="/reservation.html">예약 화면</a>
+        <button id="logoutBtn" class="ghost-button" type="button">로그아웃</button>
+      </div>
+    </header>
+
+    <section class="layout reservation-layout">
+      <section class="main-column">
+        <section class="card stack">
+          <div class="section-head">
+            <div>
+              <p class="section-kicker">관리</p>
+              <h2>공연장 / 이벤트 / 좌석 생성</h2>
+            </div>
+          </div>
+
+          <div class="admin-grid">
+            <form id="venueForm" class="panel stack">
+              <div class="mini-head">
+                <h3>공연장 생성</h3>
+              </div>
+              <label class="field">
+                <span>공연장 이름</span>
+                <input name="name" placeholder="Seoul Arena" autocomplete="off">
+              </label>
+              <label class="field">
+                <span>위치</span>
+                <input name="location" placeholder="Seoul, Korea" autocomplete="off">
+              </label>
+              <button class="primary-button" type="submit">공연장 생성</button>
+            </form>
+
+            <form id="eventForm" class="panel stack">
+              <div class="mini-head">
+                <h3>이벤트 생성</h3>
+              </div>
+              <label class="field">
+                <span>공연장 ID</span>
+                <input name="venueId" type="number" min="1" placeholder="1">
+              </label>
+              <label class="field">
+                <span>이벤트 이름</span>
+                <input name="name" placeholder="Concert Night" autocomplete="off">
+              </label>
+              <label class="field">
+                <span>시작 시각</span>
+                <input name="startAt" type="datetime-local">
+              </label>
+              <label class="field">
+                <span>종료 시각</span>
+                <input name="endAt" type="datetime-local">
+              </label>
+              <button class="primary-button" type="submit">이벤트 생성</button>
+            </form>
+
+            <form id="sectionForm" class="panel stack">
+              <div class="mini-head">
+                <h3>구역 생성</h3>
+              </div>
+              <label class="field">
+                <span>공연장 ID</span>
+                <input name="venueId" type="number" min="1" placeholder="1">
+              </label>
+              <label class="field">
+                <span>구역명</span>
+                <input name="section" placeholder="A" autocomplete="off">
+              </label>
+              <button class="primary-button" type="submit">구역 생성</button>
+            </form>
+
+            <form id="physicalSeatForm" class="panel stack">
+              <div class="mini-head">
+                <h3>물리 좌석 생성</h3>
+              </div>
+              <label class="field">
+                <span>구역 ID</span>
+                <input name="seatSectionId" type="number" min="1" placeholder="1">
+              </label>
+              <label class="field">
+                <span>생성 개수</span>
+                <input name="count" type="number" min="1" placeholder="100">
+              </label>
+              <button class="primary-button" type="submit">물리 좌석 생성</button>
+            </form>
+
+            <form id="eventSeatForm" class="panel stack">
+              <div class="mini-head">
+                <h3>판매 좌석 생성</h3>
+              </div>
+              <label class="field">
+                <span>이벤트 ID</span>
+                <input name="eventId" type="number" min="1" placeholder="1">
+              </label>
+              <label class="field">
+                <span>구역 ID</span>
+                <input name="seatSectionId" type="number" min="1" placeholder="1">
+              </label>
+              <label class="field">
+                <span>등급</span>
+                <select name="grade">
+                  <option value="VIP">VIP</option>
+                  <option value="R">R</option>
+                  <option value="S">S</option>
+                  <option value="A">A</option>
+                </select>
+              </label>
+              <label class="field">
+                <span>가격</span>
+                <input name="price" type="number" min="0" placeholder="50000">
+              </label>
+              <button class="primary-button" type="submit">판매 좌석 생성</button>
+            </form>
+          </div>
+        </section>
+      </section>
+
+      <aside class="card sidebar">
+        <div class="section-head">
+          <div>
+            <p class="section-kicker">상태</p>
+            <h2>생성 결과</h2>
+          </div>
+        </div>
+
+        <section class="mini-panel">
+          <div class="mini-head">
+            <h3>최근 생성 데이터</h3>
+            <button id="clearLogBtn" class="ghost-button" type="button">지우기</button>
+          </div>
+          <div id="creationResult" class="result-panel">
+            <div class="result-box">
+              <strong>아직 생성된 데이터가 없습니다.</strong>
+              <span class="small muted">공연장, 구역, 물리 좌석, 판매 좌석을 만들면 여기에서 바로 확인할 수 있습니다.</span>
+            </div>
+          </div>
+        </section>
+
+        <section class="mini-panel">
+          <div class="mini-head">
+            <h3>응답 로그</h3>
+          </div>
+          <pre id="responseLog" class="admin-log">아직 작업이 없습니다.</pre>
+        </section>
+      </aside>
+    </section>
+  </main>
+
+  <div id="toast" class="toast" aria-live="polite"></div>
+
+  <script src="/auth.js"></script>
+  <script src="/admin.js"></script>
+</body>
+</html>

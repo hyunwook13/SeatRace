@@ -37,6 +37,13 @@ public class EventSeat extends BaseEntity {
   private Seat seat;
 
   @Enumerated(EnumType.STRING)
+  @Column(length = 10)
+  private SeatGrade grade;
+
+  @Column
+  private Long price;
+
+  @Enumerated(EnumType.STRING)
   @Column(nullable = false, length = 20)
   private EventSeatStatus status;
 
@@ -53,6 +60,11 @@ public class EventSeat extends BaseEntity {
     this.seat = seat;
     this.status = status;
     this.heldUntil = heldUntil;
+  }
+
+  public void applyCommercialTerms(SeatGrade grade, Long price) {
+    this.grade = grade;
+    this.price = price;
   }
 
   public void holdUntil(LocalDateTime expiresAt) {

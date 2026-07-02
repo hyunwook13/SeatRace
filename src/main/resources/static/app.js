@@ -50,10 +50,7 @@ async function loadEvents(showToast = false) {
     return;
   }
 
-  state.events = await response.json();
-  if (!state.selectedEventId && state.events.length > 0) {
-    state.selectedEventId = Number(state.events[0].id);
-  }
+  state.events = sortEventsByLatest(await response.json());
   if (urlState.eventId) {
     state.selectedEventId = urlState.eventId;
   }
@@ -120,9 +117,11 @@ function renderEvents() {
 function renderFeaturedEvent() {
   const event = currentEvent();
   if (!event) {
-    els.featuredTitle.textContent = '이벤트를 불러오는 중';
-    els.featuredCopy.textContent = '잠시만 기다리면 현재 등록된 이벤트가 표시됩니다.';
+    els.featuredTitle.textContent = '이벤트를 선택하세요';
+    els.featuredCopy.textContent = '추천 리스트에서 원하는 이벤트를 고르면 상세 정보가 표시됩니다.';
     els.featuredMeta.innerHTML = '';
+    els.featuredReserveBtn.disabled = true;
+    els.featuredLikeBtn.disabled = true;
     return;
   }
 
@@ -134,12 +133,14 @@ function renderFeaturedEvent() {
     <span>${isFavorite(event.id) ? '관심 등록됨' : '관심 가능'}</span>
   `;
   els.featuredLikeBtn.textContent = isFavorite(event.id) ? '관심 해제' : '관심 등록';
+  els.featuredReserveBtn.disabled = false;
+  els.featuredLikeBtn.disabled = false;
 }
 
 function renderSidebar() {
   const event = currentEvent();
   if (!event) {
-    els.selectedPanel.innerHTML = '<p class="muted">이벤트를 선택하면 상세 정보가 표시됩니다.</p>';
+    els.selectedPanel.innerHTML = '<p class="muted">아직 선택된 이벤트가 없습니다.</p>';
     renderFavorites();
     updateAuthUi();
     return;
@@ -167,7 +168,6 @@ function renderSidebar() {
         ${isFavorite(event.id) ? '관심 해제' : '관심 등록'}
       </button>
     </div>
-    <p class="muted small">${state.token ? '로그인된 상태입니다.' : '예약하기를 누르면 로그인 화면으로 이동합니다.'}</p>
   `;
 
   document.getElementById('sidebarReserveBtn').addEventListener('click', () => reserveEvent(event.id));
@@ -266,11 +266,13 @@ function updateAuthUi() {
 
   if (state.token) {
     els.userState.textContent = user ? `${user.name || user.email || 'user'} 님` : '로그인됨';
+    els.userState.classList.remove('hidden');
     els.loginLink.classList.add('hidden');
     els.signupLink.classList.add('hidden');
     els.logoutBtn.classList.remove('hidden');
   } else {
-    els.userState.textContent = '미로그인';
+    els.userState.textContent = '';
+    els.userState.classList.add('hidden');
     els.loginLink.classList.remove('hidden');
     els.signupLink.classList.remove('hidden');
     els.loginLink.href = buildLoginUrl(currentAppUrl());
@@ -282,7 +284,7 @@ function updateAuthUi() {
 }
 
 function currentEvent() {
-  return findEvent(state.selectedEventId) || state.events[0] || null;
+  return findEvent(state.selectedEventId) || null;
 }
 
 function findEvent(eventId) {
@@ -312,6 +314,24 @@ function buildAppUrl({ eventId = null } = {}) {
     url.searchParams.set('eventId', String(eventId));
   }
   return url.toString();
+}
+
+function sortEventsByLatest(events) {
+  return [...events].sort((left, right) => {
+    const leftCreatedAt = Date.parse(left?.createdAt || '');
+    const rightCreatedAt = Date.parse(right?.createdAt || '');
+    if (!Number.isNaN(leftCreatedAt) && !Number.isNaN(rightCreatedAt) && leftCreatedAt !== rightCreatedAt) {
+      return rightCreatedAt - leftCreatedAt;
+    }
+
+    const leftStartAt = Date.parse(left?.startAt || '');
+    const rightStartAt = Date.parse(right?.startAt || '');
+    if (!Number.isNaN(leftStartAt) && !Number.isNaN(rightStartAt) && leftStartAt !== rightStartAt) {
+      return rightStartAt - leftStartAt;
+    }
+
+    return Number(right?.id || 0) - Number(left?.id || 0);
+  });
 }
 
 function currentAppUrl() {

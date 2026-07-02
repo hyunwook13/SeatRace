@@ -11,6 +11,7 @@ public class EventResponse {
 
   private final Long id;
   private final String name;
+  private final String createdAt;
   private final EventStatusSummary status;
   private final String startAt;
   private final String endAt;
@@ -23,6 +24,7 @@ public class EventResponse {
     return new EventResponse(
         event.getId(),
         event.getName(),
+        event.getCreatedAt() != null ? event.getCreatedAt().toString() : null,
         EventStatusSummary.from(event.getStatus()),
         event.getStartAt().toString(),
         event.getEndAt().toString(),

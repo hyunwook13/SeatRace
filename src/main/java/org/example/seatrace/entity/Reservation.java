@@ -11,7 +11,6 @@ import jakarta.persistence.Id;
 import jakarta.persistence.JoinColumn;
 import jakarta.persistence.ManyToOne;
 import jakarta.persistence.Table;
-import java.math.BigDecimal;
 import java.time.LocalDateTime;
 import lombok.AccessLevel;
 import lombok.Builder;
@@ -43,6 +42,25 @@ public class Reservation extends BaseEntity {
   @Column
   private LocalDateTime expiresAt;
 
+  @Column(length = 100, unique = true)
+  private String paymentOrderId;
+
+  @Column(length = 200)
+  private String paymentKey;
+
+  @Column
+  private Long paymentAmount;
+
+  @Enumerated(EnumType.STRING)
+  @Column(length = 20)
+  private PaymentStatus paymentStatus;
+
+  @Column(length = 500)
+  private String paymentFailureReason;
+
+  @Column
+  private LocalDateTime paidAt;
+
   @Builder
   public Reservation(User user, Event event, ReservationStatus status,
       LocalDateTime expiresAt) {
@@ -62,5 +80,24 @@ public class Reservation extends BaseEntity {
 
   public void cancel() {
     this.status = ReservationStatus.CANCELLED;
+  }
+
+  public void issuePaymentOrder(String paymentOrderId, Long paymentAmount) {
+    this.paymentOrderId = paymentOrderId;
+    this.paymentAmount = paymentAmount;
+    this.paymentStatus = PaymentStatus.PENDING;
+    this.paymentFailureReason = null;
+  }
+
+  public void confirmPayment(String paymentKey) {
+    this.paymentKey = paymentKey;
+    this.paymentStatus = PaymentStatus.CONFIRMED;
+    this.paymentFailureReason = null;
+    this.paidAt = LocalDateTime.now();
+  }
+
+  public void failPayment(String reason) {
+    this.paymentStatus = PaymentStatus.FAILED;
+    this.paymentFailureReason = reason;
   }
 }

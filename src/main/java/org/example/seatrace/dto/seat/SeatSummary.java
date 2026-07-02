@@ -12,10 +12,9 @@ public class SeatSummary {
   private final String section;
   private final String rowNo;
   private final String seatNo;
-  private final String grade;
 
   public static SeatSummary from(Seat seat) {
-    return new SeatSummary(seat.getId(), seat.getSection(), seat.getRowNo(), seat.getSeatNo(),
-        seat.getGrade());
+    return new SeatSummary(seat.getId(), seat.getSeatSection().getName(), seat.getSeatRow(),
+        String.valueOf(seat.getSeatNumber()));
   }
 }

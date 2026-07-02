@@ -3,15 +3,11 @@ package org.example.seatrace.controller;
 import jakarta.validation.Valid;
 import io.swagger.v3.oas.annotations.security.SecurityRequirement;
 import lombok.RequiredArgsConstructor;
-import org.example.seatrace.dto.seat.BulkSeatCreateResponse;
-import org.example.seatrace.dto.seat.SeatGenerateRequest;
 import org.example.seatrace.dto.venue.VenueCreateRequest;
 import org.example.seatrace.dto.venue.VenueResponse;
 import org.example.seatrace.service.VenueAdminService;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
-import org.springframework.security.core.Authentication;
-import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
@@ -29,13 +25,5 @@ public class AdminVenueController {
   @PostMapping
   public ResponseEntity<VenueResponse> createVenue(@RequestBody @Valid VenueCreateRequest request) {
     return ResponseEntity.status(HttpStatus.CREATED).body(venueAdminService.createVenue(request));
-  }
-
-  @PostMapping("/{venueId}/seats/generate")
-  public ResponseEntity<BulkSeatCreateResponse> generateSeats(@PathVariable Long venueId,
-      @RequestBody @Valid SeatGenerateRequest request, Authentication authentication) {
-    return ResponseEntity.status(HttpStatus.CREATED)
-        .body(venueAdminService.generateSeats(venueId, request,
-            authentication == null ? null : authentication.getName()));
   }
 }

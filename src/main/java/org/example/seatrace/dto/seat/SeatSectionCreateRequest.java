@@ -1,13 +1,13 @@
 package org.example.seatrace.dto.seat;
 
-import jakarta.validation.constraints.Min;
+import jakarta.validation.constraints.NotBlank;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
 
 @Getter
 @NoArgsConstructor
-public class SeatGenerateRequest {
+public class SeatSectionCreateRequest {
 
-  @Min(1)
-  private int count;
+  @NotBlank
+  private String name;
 }
