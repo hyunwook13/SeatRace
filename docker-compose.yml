@@ -33,6 +33,8 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
+      args:
+        SCOUTER_AGENT_VERSION: ${SCOUTER_AGENT_VERSION:-none}
     depends_on:
       postgres:
         condition: service_healthy
@@ -42,7 +44,7 @@ services:
       - .env
     environment:
       SPRING_PROFILES_ACTIVE: ${SPRING_PROFILES_ACTIVE:-}
-      SPRING_DATASOURCE_URL: ${SPRING_DATASOURCE_URL_DOCKER:-jdbc:postgresql://postgres:5432/seatrace}
+      SPRING_DATASOURCE_URL: ${SPRING_DATASOURCE_URL:-jdbc:postgresql://postgres:5432/seatrace}
       SPRING_DATASOURCE_USERNAME: ${DB_NAME:-seatrace}
       SPRING_DATASOURCE_PASSWORD: ${DB_PW:-seatrace}
       REDIS_HOST: ${REDIS_HOST_DOCKER:-redis}
@@ -63,13 +65,30 @@ services:
       VIRTUAL_QUEUE_ADVANCE_DELAY_MS: ${VIRTUAL_QUEUE_ADVANCE_DELAY_MS:-200}
       # Optional: Hikari pool debug logs
       LOG_LEVEL_HIKARI: ${LOG_LEVEL_HIKARI:-INFO}
+      # Optional: enabled by running with docker compose --profile scouter and setting JAVA_TOOL_OPTIONS below.
+      JAVA_TOOL_OPTIONS: ${JAVA_TOOL_OPTIONS:-}
     restart: unless-stopped
+    stop_grace_period: 30s
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://localhost:50000/actuator/health/readiness >/dev/null || exit 1"]
+      interval: 10s
+      timeout: 3s
+      retries: 10
+      start_period: 20s
 
   nginx:
     image: nginx:1.27-alpine
     container_name: seatrace-nginx
+    command:
+      - /bin/sh
+      - -c
+      - |
+        app_replicas=$$(i=0; while [ $$i -lt 10 ]; do getent hosts app | cut -d' ' -f1; i=$$((i + 1)); done | sort -u | wc -l)
+        echo "[nginx] discovered app replicas: $$app_replicas"
+        exec nginx -g 'daemon off;'
     depends_on:
-      - app
+      app:
+        condition: service_healthy
     ports:
       - "8080:80"
     volumes:
