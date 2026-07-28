@@ -1,0 +1,55 @@
+# Scouter 2.21.x 계열의 Java 21 빌드/실행 요구사항에 맞춘 런타임
+FROM eclipse-temurin:21-jre-alpine
+
+# 가이드 다운로드, 압축 관리, JVM/컨테이너 시간대 설정을 위한 유틸 패키지 설치
+RUN apk add --no-cache wget unzip bash tzdata
+
+WORKDIR /opt
+ARG SCOUTER_SERVER_VERSION=2.21.3
+
+# [Step 1] 순정 scouter-server 다운로드 및 압축 해제
+RUN wget https://github.com/scouter-project/scouter/releases/download/v${SCOUTER_SERVER_VERSION}/scouter-all-${SCOUTER_SERVER_VERSION}.tar.gz -O /tmp/scouter.tar.gz \
+    && tar -xzf /tmp/scouter.tar.gz -C /opt \
+    && rm -rf /tmp/scouter.tar.gz
+
+# [Step 2] 호환되는 scouter-paper 2.6.4 zip 패키지 다운로드 및 해제
+RUN wget https://github.com/scouter-contrib/scouter-paper/releases/download/2.6.4/scouter-paper-v2.6.4.zip -O /tmp/paper.zip \
+    && unzip /tmp/paper.zip -d /tmp/paper_extracted \
+    && rm -rf /tmp/paper.zip
+
+# [Step 3] ✨ [수정] 자식 폴더 계층 구조 구조(scouter-paper/*)가 있든 없든 예외 없이 extweb 루트로 탈탈 털어서 이식
+RUN mkdir -p /opt/scouter/webapp/extweb \
+    && if [ -d "/tmp/paper_extracted/scouter-paper" ]; then \
+         cp -a /tmp/paper_extracted/scouter-paper/* /opt/scouter/webapp/extweb/; \
+       else \
+         cp -a /tmp/paper_extracted/* /opt/scouter/webapp/extweb/; \
+       fi \
+    && rm -rf /tmp/paper_extracted
+
+# [Step 4] 정석 경로(/opt/scouter) 내부의 scouter.conf 끝단에 포트 및 Web API 활성화 옵션 주입
+RUN echo "" >> /opt/scouter/server/conf/scouter.conf \
+    && echo "net_http_server_enabled=true" >> /opt/scouter/server/conf/scouter.conf \
+    && echo "net_http_api_enabled=true" >> /opt/scouter/server/conf/scouter.conf \
+    && echo "net_http_port=6180" >> /opt/scouter/server/conf/scouter.conf
+
+# 기동 쉘 스크립트 실행 권한 승인
+RUN chmod +x /opt/scouter/server/startup.sh \
+    && chmod +x /opt/scouter/webapp/startup.sh \
+    && chmod +x /opt/scouter/agent.host/host.sh
+
+# 개방할 네트워크 포트 명시 (6100: 에이전트/클라이언트 수신, 6188: Web UI)
+EXPOSE 6100/tcp 6100/udp 6188
+
+# [Step 5] 독립적인 서브쉘(Subshell) 작업 경로 격리 기동 고정
+# 기존의 CMD를 아래와 같이 변경합니다.
+# 1. 서버 시작 (백그라운드 실행을 명시)
+# 2. 웹앱 시작 (백그라운드 실행을 명시)
+# 3. 로그 파일이 없으면 생성
+# 4. 로그를 꼬리물기(tail)하여 메인 프로세스 유지
+CMD ["/bin/bash", "-c", \
+    "rm -f /opt/scouter/server/database/lock.dat && \
+     mkdir -p /opt/scouter/server/logs /opt/scouter/webapp/logs && \
+     cd /opt/scouter/server && ./startup.sh && \
+     cd /opt/scouter/webapp && ./startup.sh && \
+     touch /opt/scouter/server/nohup.out /opt/scouter/webapp/nohup.out && \
+     tail -f /opt/scouter/server/nohup.out /opt/scouter/webapp/nohup.out"]

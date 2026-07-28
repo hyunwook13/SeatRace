@@ -126,6 +126,7 @@ curl -X POST http://localhost:8080/login \
 - Actuator Health: `http://localhost:8080/actuator/health`
 - Prometheus 메트릭: `http://localhost:8080/actuator/prometheus`
 - Grafana 대시보드: `http://localhost:3000` (기본 계정 `admin/admin`)
+- Scouter collector: `localhost:6100` (Scouter Client에서 접속)
 
 ## 10) 프로젝트 구조
 
@@ -168,3 +169,32 @@ EVENT_ID=1 SEAT_ID_FROM=1 SEAT_ID_TO=100 READ_RPS=500 WRITE_RPS=100 DURATION=30s
 
 - (A)는 Prometheus의 `hikaricp_connections_*` 지표로 `active/pending/timeout` 피크를 비교합니다.
 - (B)는 k6 요약(`CQRS Isolation Summary`)의 `read_p95`, `write_p95`, `write_ok_rate`와 함께 `seat_db_load_inc_*`(좌석 조회가 DB를 얼마나 때렸는지)까지 같이 확인합니다.
+
+### Scouter APM 프로파일링
+
+Grafana/Prometheus는 시스템 지표와 추세를 보기 좋고, Scouter는 요청 내부의 method profile, SQL/JDBC 구간, thread 상태를 더 자세히 확인하기 좋습니다.
+
+Scouter를 함께 실행하려면 compose override를 사용합니다.
+
+```bash
+docker compose -f docker-compose.yml -f docker-compose.scouter.yml up -d --build --scale app=2 scouter scouter-host app nginx
+```
+
+Scouter Paper는 `http://localhost:6188/extweb/index.html`에서 확인합니다. Scouter Client에서는 `localhost:6100`으로 접속합니다. 앱 컨테이너는 `JAVA_TOOL_OPTIONS`로 아래 agent를 활성화합니다.
+
+```text
+-javaagent:/opt/scouter/agent.java/scouter.agent.jar
+-Duser.timezone=Asia/Seoul
+-Dscouter.config=/opt/scouter/agent.java/scouter.conf
+```
+
+주요 확인 포인트:
+
+- `/api/events/{eventId}/seats`: Redis/local cache hit 이후 DB 호출이 줄어드는지
+- `/api/events/{eventId}/holds`: 분산락, Redis fast-fail, DB transaction 구간 중 어디가 p95를 만드는지
+- hold 만료 cleanup: scheduler chunk 처리 중 JDBC 시간이 긴지
+- Redis 장애 테스트: Redis timeout이 request thread를 오래 붙잡는지
+- 결제 기능 추가 시: fake payment delay 중 DB connection을 점유하지 않는지
+
+Scouter agent 설정은 `scouter/agent.java/scouter.conf`에 있습니다. 기본 profile 범위는 controller/service/repository 패키지입니다. Host CPU, memory, disk, network 지표는 `scouter-host`의 Host Agent가 수집합니다.
+기본 버전은 Scouter `2.21.3`이며, `SCOUTER_AGENT_VERSION`, `SCOUTER_SERVER_VERSION`으로 변경할 수 있습니다.

@@ -1,0 +1,77 @@
+services:
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        SCOUTER_AGENT_VERSION: ${SCOUTER_AGENT_VERSION:-2.21.3}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      scouter:
+        condition: service_started
+    environment:
+      TZ: Asia/Seoul
+      JAVA_TOOL_OPTIONS: >-
+        -javaagent:/opt/scouter/agent.java/scouter.agent.jar
+        -Duser.timezone=Asia/Seoul
+        --add-opens=java.base/java.lang=ALL-UNNAMED
+        --add-exports=java.base/sun.net=ALL-UNNAMED
+        -Djdk.attach.allowAttachSelf=true
+        -Dscouter.config=/opt/scouter/agent.java/scouter.conf
+    volumes:
+      - ./scouter/agent.java/scouter.conf:/opt/scouter/agent.java/scouter.conf:ro
+
+  scouter:
+    build:
+      context: .
+      dockerfile: Dockerfile.scouter
+      args:
+        SCOUTER_SERVER_VERSION: ${SCOUTER_SERVER_VERSION:-2.21.3}
+    container_name: seatrace-scouter
+    # ❌ 기존의 platform: linux/amd64 라인을 완전히 과감하게 삭제했습니다!
+    # 💡 이렇게 지워두어야 도커가 알아서 개발자님의 M2 Mac(ARM64/v8) 환경을 인식하고 네이티브로 빌드합니다.
+    ports:
+      - "6100:6100/tcp"
+      - "6100:6100/udp"
+      - "6188:6188"
+    environment:
+      TZ: Asia/Seoul
+      JAVA_TOOL_OPTIONS: >-
+        -Duser.timezone=Asia/Seoul
+        --add-opens=java.base/java.lang=ALL-UNNAMED
+        --add-exports=java.base/sun.net=ALL-UNNAMED
+        -Djdk.attach.allowAttachSelf=true
+    volumes:
+      - scouter-data:/opt/scouter/server/database
+    restart: unless-stopped
+
+  scouter-host:
+    build:
+      context: .
+      dockerfile: Dockerfile.scouter
+      args:
+        SCOUTER_SERVER_VERSION: ${SCOUTER_SERVER_VERSION:-2.21.3}
+    container_name: seatrace-scouter-host
+    depends_on:
+      scouter:
+        condition: service_started
+    environment:
+      TZ: Asia/Seoul
+      JAVA_TOOL_OPTIONS: >-
+        -Duser.timezone=Asia/Seoul
+        --add-opens=java.base/java.lang=ALL-UNNAMED
+        --add-exports=java.base/sun.net=ALL-UNNAMED
+        -Djdk.attach.allowAttachSelf=true
+    volumes:
+      - ./scouter/agent.host/scouter.conf:/opt/scouter/agent.host/conf/scouter.conf:ro
+    command: ["/bin/bash", "-c", "cd /opt/scouter/agent.host && ./host.sh && touch nohup.out && tail -f nohup.out"]
+    restart: unless-stopped
+
+  # 💡 만약 독립형 scouter-paper 컨테이너 서비스 정의가 컴포즈 파일 아래쪽에 남아있다면,
+  # 💡 거기서도 platform: linux/amd64 코드를 전부 찾아서 싹 지워주세요!
+
+volumes:
+  scouter-data:
