@@ -25,10 +25,10 @@ public class ReservationHoldRedisService {
   public void registerHold(Long reservationId, List<Long> eventSeatIds) {
     Duration ttl = holdTtl();
     try {
-      redisFacade.set(reservationHoldKey(reservationId), reservationId.toString(), ttl);
+      redisFacade.set(RedisOperationFeature.RESERVATION_HOLD, reservationHoldKey(reservationId), reservationId.toString(), ttl);
 
       for (Long eventSeatId : eventSeatIds) {
-        redisFacade.set(eventSeatHoldKey(eventSeatId), reservationId.toString(), ttl);
+        redisFacade.set(RedisOperationFeature.RESERVATION_HOLD, eventSeatHoldKey(eventSeatId), reservationId.toString(), ttl);
       }
     } catch (Exception ex) {
       // afterCommit에서 호출되는 경우가 많아서 예외를 밖으로 던지지 않는다.
@@ -39,7 +39,7 @@ public class ReservationHoldRedisService {
   public boolean hasAnyEventSeatHold(List<Long> eventSeatIds) {
     try {
       for (Long eventSeatId : eventSeatIds) {
-        if (Boolean.TRUE.equals(redisFacade.hasKey(eventSeatHoldKey(eventSeatId)))) {
+        if (Boolean.TRUE.equals(redisFacade.hasKey(RedisOperationFeature.RESERVATION_HOLD, eventSeatHoldKey(eventSeatId)))) {
           return true;
         }
       }
@@ -54,7 +54,7 @@ public class ReservationHoldRedisService {
 
   public boolean isReservationHoldAlive(Long reservationId) {
     try {
-      return Boolean.TRUE.equals(redisFacade.hasKey(reservationHoldKey(reservationId)));
+      return Boolean.TRUE.equals(redisFacade.hasKey(RedisOperationFeature.RESERVATION_HOLD, reservationHoldKey(reservationId)));
     } catch (Exception ex) {
       // Redis 장애 시 false로 판단하면 잘못된 만료/정리가 발생할 수 있어 보수적으로 'alive'로 취급한다.
       log.warn("Redis isReservationHoldAlive failed. fallback=true (skip cleanup). reservationId={}",
@@ -65,10 +65,10 @@ public class ReservationHoldRedisService {
 
   public void clearHold(Long reservationId, List<Long> eventSeatIds) {
     try {
-      redisFacade.delete(reservationHoldKey(reservationId));
+      redisFacade.delete(RedisOperationFeature.RESERVATION_HOLD, reservationHoldKey(reservationId));
 
       if (!eventSeatIds.isEmpty()) {
-        redisFacade.delete(eventSeatIds.stream().map(this::eventSeatHoldKey).toList());
+        redisFacade.delete(RedisOperationFeature.RESERVATION_HOLD, eventSeatIds.stream().map(this::eventSeatHoldKey).toList());
       }
     } catch (Exception ex) {
       // afterCommit에서 호출되는 경우가 많아서 예외를 밖으로 던지지 않는다.

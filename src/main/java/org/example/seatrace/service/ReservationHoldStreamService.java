@@ -45,7 +45,7 @@ public class ReservationHoldStreamService {
 
     for (int attempt = 0; attempt < MAX_ADD_RETRY; attempt++) {
       try {
-        redisFacade.xAdd(STREAM_KEY, expiresAtMillis + "-" + seq, body);
+        redisFacade.xAdd(RedisOperationFeature.HOLD_STREAM, STREAM_KEY, expiresAtMillis + "-" + seq, body);
         added = true;
         Counter.builder("seatrace.hold.stream.enqueued.total")
             .description("Total number of hold expiration entries enqueued to Redis Stream")
@@ -85,7 +85,7 @@ public class ReservationHoldStreamService {
       String maxId = nowMillis + "-" + MAX_SEQUENCE;
 
       Range<String> range = Range.of(Range.Bound.exclusive(lastId), Range.Bound.inclusive(maxId));
-      records = redisFacade.xRange(STREAM_KEY, range, maxCount);
+      records = redisFacade.xRange(RedisOperationFeature.HOLD_STREAM, STREAM_KEY, range, maxCount);
     } catch (Exception ex) {
       log.warn("홀드 만료 스트림 read 실패", ex);
       return HoldExpireBatch.empty();
@@ -130,8 +130,8 @@ public class ReservationHoldStreamService {
 
     RecordId[] ids = batch.recordIds().toArray(new RecordId[0]);
     try {
-      redisFacade.xDel(STREAM_KEY, ids);
-      redisFacade.set(STREAM_LAST_ID_KEY, batch.lastId());
+      redisFacade.xDel(RedisOperationFeature.HOLD_STREAM, STREAM_KEY, ids);
+      redisFacade.set(RedisOperationFeature.HOLD_STREAM, STREAM_LAST_ID_KEY, batch.lastId());
     } catch (Exception ex) {
       log.warn("홀드 만료 스트림 markProcessed 실패: lastId={}", batch.lastId(), ex);
       return;
@@ -145,7 +145,7 @@ public class ReservationHoldStreamService {
 
   private String getLastProcessedId() {
     try {
-      String lastId = redisFacade.get(STREAM_LAST_ID_KEY);
+      String lastId = redisFacade.get(RedisOperationFeature.HOLD_STREAM, STREAM_LAST_ID_KEY);
       return Objects.requireNonNullElse(lastId, "0-0");
     } catch (Exception ex) {
       return "0-0";

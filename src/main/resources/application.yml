@@ -41,6 +41,35 @@ reservation:
     lease-ms: ${RESERVATION_LOCK_LEASE_MS:3000}
     required: ${RESERVATION_LOCK_REQUIRED:false}
 
+# Set REDIS_DEGRADED_MODE_ENABLED=true only with the degraded profile or an
+# equivalent configuration that disables the Redis-backed queue and lock.
+redis:
+  degraded-mode:
+    enabled: ${REDIS_DEGRADED_MODE_ENABLED:false}
+
+resilience4j:
+  circuitbreaker:
+    configs:
+      redis-dependency:
+        sliding-window-type: COUNT_BASED
+        sliding-window-size: 10
+        minimum-number-of-calls: 5
+        failure-rate-threshold: 50
+        wait-duration-in-open-state: 5s
+        permitted-number-of-calls-in-half-open-state: 3
+        automatic-transition-from-open-to-half-open-enabled: true
+    instances:
+      seatCache:
+        base-config: redis-dependency
+      queueAdmission:
+        base-config: redis-dependency
+      reservationHold:
+        base-config: redis-dependency
+      holdStream:
+        base-config: redis-dependency
+      reservationLock:
+        base-config: redis-dependency
+
 virtual-queue:
   enabled: ${VIRTUAL_QUEUE_ENABLED:true}
   tps: ${VIRTUAL_QUEUE_TPS:500}

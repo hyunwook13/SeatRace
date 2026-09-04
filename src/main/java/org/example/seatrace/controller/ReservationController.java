@@ -16,6 +16,7 @@ import org.example.seatrace.dto.reservation.HoldSeatResponse;
 import org.example.seatrace.dto.reservation.ReservationResponse;
 import org.example.seatrace.security.CustomUserPrincipal;
 import org.example.seatrace.service.ReservationService;
+import org.example.seatrace.service.RedisDegradedModeGuard;
 import org.example.seatrace.service.VirtualQueueService;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
@@ -36,6 +37,7 @@ public class ReservationController {
 
   private final ReservationService reservationService;
   private final VirtualQueueService virtualQueueService;
+  private final RedisDegradedModeGuard redisDegradedModeGuard;
 
   @PostMapping("/events/{eventId}/holds")
   @Operation(summary = "좌석 홀드", description = "선택한 좌석을 홀드 상태로 생성합니다.")
@@ -56,6 +58,7 @@ public class ReservationController {
       @RequestHeader(value = "X-Queue-Token", required = false) String queueToken,
       @RequestBody HoldSeatRequest request
   ) {
+    redisDegradedModeGuard.requireReservationAvailable();
     if (!virtualQueueService.isAdmitted(eventId, principal.getUserId(), queueToken)) {
       return ResponseEntity.status(429).body(virtualQueueService.notAdmittedResponse(eventId));
     }
@@ -70,6 +73,7 @@ public class ReservationController {
       @PathVariable Long eventId,
       @AuthenticationPrincipal CustomUserPrincipal principal
   ) {
+    redisDegradedModeGuard.requireQueueAvailable();
     return ResponseEntity.ok(
         virtualQueueService.enterOrWait(eventId, principal.getUserId())
     );
@@ -81,6 +85,7 @@ public class ReservationController {
       @PathVariable Long eventId,
       @AuthenticationPrincipal CustomUserPrincipal principal
   ) {
+    redisDegradedModeGuard.requireQueueAvailable();
     return ResponseEntity.ok(
         virtualQueueService.status(eventId, principal.getUserId())
     );
@@ -101,6 +106,7 @@ public class ReservationController {
       @PathVariable Long reservationId,
       @AuthenticationPrincipal CustomUserPrincipal principal
   ) {
+    redisDegradedModeGuard.requireReservationAvailable();
     return ResponseEntity.ok(
         reservationService.confirmReservation(principal.getUserId(), reservationId)
     );
@@ -121,6 +127,7 @@ public class ReservationController {
       @PathVariable Long reservationId,
       @AuthenticationPrincipal CustomUserPrincipal principal
   ) {
+    redisDegradedModeGuard.requireReservationAvailable();
     return ResponseEntity.ok(
         reservationService.cancelReservation(principal.getUserId(), reservationId)
     );

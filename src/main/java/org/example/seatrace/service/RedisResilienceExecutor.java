@@ -10,18 +10,20 @@ import org.springframework.stereotype.Component;
 @Component
 public class RedisResilienceExecutor {
 
-  private final CircuitBreaker circuitBreaker;
-  private final Bulkhead bulkhead;
+  private final CircuitBreakerRegistry circuitBreakerRegistry;
+  private final BulkheadRegistry bulkheadRegistry;
 
   public RedisResilienceExecutor(
       CircuitBreakerRegistry circuitBreakerRegistry,
       BulkheadRegistry bulkheadRegistry
   ) {
-    this.circuitBreaker = circuitBreakerRegistry.circuitBreaker("redisCore");
-    this.bulkhead = bulkheadRegistry.bulkhead("redisCore");
+    this.circuitBreakerRegistry = circuitBreakerRegistry;
+    this.bulkheadRegistry = bulkheadRegistry;
   }
 
-  public <T> T execute(CheckedSupplier<T> supplier) throws Throwable {
+  public <T> T execute(RedisOperationFeature feature, CheckedSupplier<T> supplier) throws Throwable {
+    CircuitBreaker circuitBreaker = circuitBreakerRegistry.circuitBreaker(feature.resilienceName());
+    Bulkhead bulkhead = bulkheadRegistry.bulkhead(feature.resilienceName());
     CheckedSupplier<T> decorated = CircuitBreaker.decorateCheckedSupplier(circuitBreaker, supplier);
     decorated = Bulkhead.decorateCheckedSupplier(bulkhead, decorated);
     return decorated.get();

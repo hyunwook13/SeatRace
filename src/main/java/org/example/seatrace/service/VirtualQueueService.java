@@ -12,6 +12,7 @@ import lombok.extern.slf4j.Slf4j;
 import org.example.seatrace.config.VirtualQueueProperties;
 import org.example.seatrace.dto.queue.QueueEnterResponse;
 import org.example.seatrace.dto.queue.QueueStatusResponse;
+import org.example.seatrace.exception.RedisUnavailableException;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 
@@ -25,6 +26,7 @@ public class VirtualQueueService {
   private static final String GATE_KEY = "seat-race:queue:gate:%d:%d";
   private static final String TOKEN_KEY = "seat-race:queue:token:%s";
   private static final String USER_TOKEN_KEY = "seat-race:queue:user-token:%d:%d";
+  private static final RedisOperationFeature REDIS_FEATURE = RedisOperationFeature.QUEUE_ADMISSION;
 
   private final RedisFacade redisFacade;
   private final VirtualQueueProperties virtualQueueProperties;
@@ -70,8 +72,7 @@ public class VirtualQueueService {
           .admissionExpiresAtMillis(0)
           .build();
     } catch (Exception ex) {
-      log.warn("VirtualQueue skipped due to Redis failure: eventId={}, userId={}", eventId, userId, ex);
-      return admittedResponseWithoutRedis(eventId, 0);
+      throw redisUnavailable("queue admission", eventId, userId, ex);
     }
   }
 
@@ -112,19 +113,7 @@ public class VirtualQueueService {
           .admissionExpiresAtMillis(tokenEntry == null ? 0 : tokenEntry.expiresAtMillis())
           .build();
     } catch (Exception ex) {
-      log.warn("VirtualQueue status degraded due to Redis failure: eventId={}, userId={}", eventId, userId, ex);
-      return QueueStatusResponse.builder()
-          .admitted(true)
-          .waiting(false)
-          .position(0)
-          .activeCount(0)
-          .waitCount(0)
-          .tps(virtualQueueProperties.getTps())
-          .activeLimit(virtualQueueProperties.getActiveLimit())
-          .estimatedWaitMillis(0)
-          .admissionToken(null)
-          .admissionExpiresAtMillis(0)
-          .build();
+      throw redisUnavailable("queue status", eventId, userId, ex);
     }
   }
 
@@ -151,7 +140,7 @@ public class VirtualQueueService {
 
     // [2단계] 로컬 캐시 Miss 시, 딱 1번 레디스 조회하여 고속 파싱 진행
     try {
-      String redisValue = redisFacade.get(tokenKey(admissionToken));
+      String redisValue = redisFacade.get(REDIS_FEATURE, tokenKey(admissionToken));
       if (redisValue == null || redisValue.isBlank()) {
         return false;
       }
@@ -167,13 +156,7 @@ public class VirtualQueueService {
       return true;
 
     } catch (Exception ex) {
-      log.warn(
-          "VirtualQueue token validation denied due to Redis failure: eventId={}, userId={}",
-          eventId,
-          userId,
-          ex
-      );
-      return false;
+      throw redisUnavailable("queue token validation", eventId, userId, ex);
     }
   }
 
@@ -258,9 +241,9 @@ public class VirtualQueueService {
     userAdmissionCache.remove(userKey, cached);
 
     try {
-      String existingToken = redisFacade.get(userKey);
+      String existingToken = redisFacade.get(REDIS_FEATURE, userKey);
       if (existingToken != null && !existingToken.isBlank()) {
-        String redisValue = redisFacade.get(tokenKey(existingToken));
+        String redisValue = redisFacade.get(REDIS_FEATURE, tokenKey(existingToken));
 
         // 토큰 발급 로직에서도 일회성 파싱을 가비지 프리 전용 메서드로 안전하게 검증
         if (validateRawTokenWithoutAllocation(redisValue, eventId, userId, now)) {
@@ -282,8 +265,8 @@ public class VirtualQueueService {
     );
     cacheAdmission(created);
     try {
-      redisFacade.set(tokenKey(created.token()), serializeTokenEntry(created), tokenTtl());
-      redisFacade.set(userKey, created.token(), tokenTtl());
+      redisFacade.set(REDIS_FEATURE, tokenKey(created.token()), serializeTokenEntry(created), tokenTtl());
+      redisFacade.set(REDIS_FEATURE, userKey, created.token(), tokenTtl());
     } catch (Exception ex) {
       log.warn("VirtualQueue token stored only locally due to Redis failure: eventId={}, userId={}", eventId, userId, ex);
     }
@@ -319,9 +302,9 @@ public class VirtualQueueService {
   private void ensureWaiting(Long eventId, Long userId) {
     String key = waitKey(eventId);
     String member = userId.toString();
-    Double score = redisFacade.zScore(key, member);
+    Double score = redisFacade.zScore(REDIS_FEATURE, key, member);
     if (score == null) {
-      redisFacade.zAdd(key, member, System.currentTimeMillis());
+      redisFacade.zAdd(REDIS_FEATURE, key, member, System.currentTimeMillis());
       Counter.builder("seatrace.queue.enter.total")
           .description("Total number of users entered into queue")
           .register(meterRegistry)
@@ -340,7 +323,7 @@ public class VirtualQueueService {
         break;
       }
 
-      Set<String> head = redisFacade.zRange(waitKey(eventId), 0, 0);
+      Set<String> head = redisFacade.zRange(REDIS_FEATURE, waitKey(eventId), 0, 0);
       if (head == null || head.isEmpty()) {
         break;
       }
@@ -350,8 +333,8 @@ public class VirtualQueueService {
       }
 
       String member = head.iterator().next();
-      redisFacade.zRemove(waitKey(eventId), member);
-      redisFacade.zAdd(activeKey(eventId), member, System.currentTimeMillis());
+      redisFacade.zRemove(REDIS_FEATURE, waitKey(eventId), member);
+      redisFacade.zAdd(REDIS_FEATURE, activeKey(eventId), member, System.currentTimeMillis());
 
       Counter.builder("seatrace.queue.advance.total")
           .description("Total number of users advanced from wait to active")
@@ -363,34 +346,34 @@ public class VirtualQueueService {
   private boolean gateAllows(Long eventId) {
     long epochSecond = System.currentTimeMillis() / 1000;
     String key = GATE_KEY.formatted(eventId, epochSecond);
-    Long count = redisFacade.increment(key);
+    Long count = redisFacade.increment(REDIS_FEATURE, key);
     if (count != null && count == 1L) {
-      redisFacade.expire(key, Duration.ofSeconds(2));
+      redisFacade.expire(REDIS_FEATURE, key, Duration.ofSeconds(2));
     }
     return count != null && count <= virtualQueueProperties.getTps();
   }
 
   private void cleanupExpiredActive(Long eventId) {
     long cutoff = System.currentTimeMillis() - (virtualQueueProperties.getActiveTtlSeconds() * 1000L);
-    redisFacade.zRemoveRangeByScore(activeKey(eventId), 0, cutoff);
+    redisFacade.zRemoveRangeByScore(REDIS_FEATURE, activeKey(eventId), 0, cutoff);
   }
 
   private boolean isActive(Long eventId, Long userId) {
-    return redisFacade.zScore(activeKey(eventId), userId.toString()) != null;
+    return redisFacade.zScore(REDIS_FEATURE, activeKey(eventId), userId.toString()) != null;
   }
 
   private long getPosition(Long eventId, Long userId) {
-    Long rank = redisFacade.zRank(waitKey(eventId), userId.toString());
+    Long rank = redisFacade.zRank(REDIS_FEATURE, waitKey(eventId), userId.toString());
     return rank == null ? -1 : rank + 1;
   }
 
   private long getActiveCount(Long eventId) {
-    Long count = redisFacade.zSize(activeKey(eventId));
+    Long count = redisFacade.zSize(REDIS_FEATURE, activeKey(eventId));
     return count == null ? 0 : count;
   }
 
   private long getWaitCount(Long eventId) {
-    Long count = redisFacade.zSize(waitKey(eventId));
+    Long count = redisFacade.zSize(REDIS_FEATURE, waitKey(eventId));
     return count == null ? 0 : count;
   }
 
@@ -400,6 +383,16 @@ public class VirtualQueueService {
       return 0;
     }
     return (position * 1000L) / tps;
+  }
+
+  private RedisUnavailableException redisUnavailable(
+      String operation,
+      Long eventId,
+      Long userId,
+      Exception cause
+  ) {
+    log.warn("VirtualQueue {} unavailable: eventId={}, userId={}", operation, eventId, userId, cause);
+    return new RedisUnavailableException("대기열을 일시적으로 처리할 수 없습니다.", cause);
   }
 
   private String waitKey(Long eventId) {

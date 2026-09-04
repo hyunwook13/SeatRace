@@ -9,8 +9,10 @@ import java.util.concurrent.TimeUnit;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.example.seatrace.config.ReservationLockProperties;
+import org.example.seatrace.exception.RedisUnavailableException;
 import org.redisson.api.RLock;
 import org.redisson.api.RedissonClient;
+import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.stereotype.Service;
 
 /**
@@ -27,9 +29,10 @@ public class DistributedLockService {
   private static final String SEAT_LOCK_KEY = "lock:seat:%d:%d"; // eventId:seatId
   private static final String RESERVATION_LOCK_KEY = "lock:reservation:%d";
 
-  private final RedissonClient redissonClient;
+  private final ObjectProvider<RedissonClient> redissonClientProvider;
   private final ReservationLockProperties reservationLockProperties;
   private final MeterRegistry meterRegistry;
+  private final RedisResilienceExecutor redisResilienceExecutor;
 
   public LockHandle tryLockSeats(long eventId, List<Long> seatIds) {
     if (!reservationLockProperties.isEnabled()) {
@@ -37,6 +40,13 @@ public class DistributedLockService {
     }
     if (seatIds == null || seatIds.isEmpty()) {
       return LockHandle.noop();
+    }
+
+    RedissonClient redissonClient = redissonClientProvider.getIfAvailable();
+    if (redissonClient == null) {
+      counter("seatrace.lock.seat.fail.total").increment();
+      log.warn("Seat distributed lock is enabled but RedissonClient is unavailable");
+      return null;
     }
 
     List<Long> sorted = new ArrayList<>(seatIds);
@@ -53,7 +63,7 @@ public class DistributedLockService {
         }
         String key = SEAT_LOCK_KEY.formatted(eventId, seatId);
         RLock lock = redissonClient.getLock(key);
-        boolean ok = lock.tryLock(waitMs, leaseMs, TimeUnit.MILLISECONDS);
+        boolean ok = tryAcquire(lock, waitMs, leaseMs);
         if (!ok) {
           unlockQuietly(acquired);
           counter("seatrace.lock.seat.fail.total").increment();
@@ -68,6 +78,10 @@ public class DistributedLockService {
       unlockQuietly(acquired);
       counter("seatrace.lock.seat.fail.total").increment();
       return null;
+    } catch (RedisUnavailableException ex) {
+      unlockQuietly(acquired);
+      counter("seatrace.lock.seat.fail.total").increment();
+      throw ex;
     } catch (Exception ex) {
       unlockQuietly(acquired);
       counter("seatrace.lock.seat.fail.total").increment();
@@ -80,12 +94,19 @@ public class DistributedLockService {
     if (!reservationLockProperties.isEnabled()) {
       return LockHandle.noop();
     }
+
+    RedissonClient redissonClient = redissonClientProvider.getIfAvailable();
+    if (redissonClient == null) {
+      counter("seatrace.lock.reservation.fail.total").increment();
+      log.warn("Reservation distributed lock is enabled but RedissonClient is unavailable");
+      return null;
+    }
     long waitMs = reservationLockProperties.getWaitMs();
     long leaseMs = reservationLockProperties.getLeaseMs();
 
     RLock lock = redissonClient.getLock(RESERVATION_LOCK_KEY.formatted(reservationId));
     try {
-      boolean ok = lock.tryLock(waitMs, leaseMs, TimeUnit.MILLISECONDS);
+      boolean ok = tryAcquire(lock, waitMs, leaseMs);
       if (!ok) {
         counter("seatrace.lock.reservation.fail.total").increment();
         return null;
@@ -96,6 +117,9 @@ public class DistributedLockService {
       Thread.currentThread().interrupt();
       counter("seatrace.lock.reservation.fail.total").increment();
       return null;
+    } catch (RedisUnavailableException ex) {
+      counter("seatrace.lock.reservation.fail.total").increment();
+      throw ex;
     } catch (Exception ex) {
       counter("seatrace.lock.reservation.fail.total").increment();
       log.warn("Reservation distributed lock failed: reservationId={}", reservationId, ex);
@@ -105,6 +129,19 @@ public class DistributedLockService {
 
   private Counter counter(String name) {
     return Counter.builder(name).register(meterRegistry);
+  }
+
+  private boolean tryAcquire(RLock lock, long waitMs, long leaseMs) throws Exception {
+    try {
+      return redisResilienceExecutor.execute(
+          RedisOperationFeature.RESERVATION_LOCK,
+          () -> lock.tryLock(waitMs, leaseMs, TimeUnit.MILLISECONDS)
+      );
+    } catch (InterruptedException ex) {
+      throw ex;
+    } catch (Throwable ex) {
+      throw new RedisUnavailableException("Redis 분산 락을 일시적으로 처리할 수 없습니다.", ex);
+    }
   }
 
   private static void unlockQuietly(List<RLock> locks) {
