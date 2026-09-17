@@ -6,6 +6,15 @@ build/
 !**/src/test/**/build/
 .env
 
+# Local benchmark and observability outputs; keep runnable scripts and fixtures in Git.
+data/
+*.pem
+tools/log/
+tools/jmeter/results/
+src/test/resources/jmeter/*.log
+tools/stale-hold/*.log
+tools/lock-benchmark/metrics_*.txt
+
 ### STS ###
 .apt_generated
 .classpath

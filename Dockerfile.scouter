@@ -1,16 +1,24 @@
-# Scouter 2.21.x 계열의 Java 21 빌드/실행 요구사항에 맞춘 런타임
-FROM eclipse-temurin:21-jre-alpine
+# Scouter 2.20.x 계열을 Java 17 런타임에서 실행
+FROM eclipse-temurin:17-jre-jammy
 
 # 가이드 다운로드, 압축 관리, JVM/컨테이너 시간대 설정을 위한 유틸 패키지 설치
-RUN apk add --no-cache wget unzip bash tzdata
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends wget unzip bash tzdata \
+    && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /opt
-ARG SCOUTER_SERVER_VERSION=2.21.3
+ARG SCOUTER_SERVER_VERSION=2.20.0
 
 # [Step 1] 순정 scouter-server 다운로드 및 압축 해제
 RUN wget https://github.com/scouter-project/scouter/releases/download/v${SCOUTER_SERVER_VERSION}/scouter-all-${SCOUTER_SERVER_VERSION}.tar.gz -O /tmp/scouter.tar.gz \
     && tar -xzf /tmp/scouter.tar.gz -C /opt \
     && rm -rf /tmp/scouter.tar.gz
+
+# Scouter 2.20.0 패키지는 jackson-databind 2.12.x와 jackson-core 2.8.x가 섞여 Web API가
+# JacksonFeature 클래스를 찾지 못할 수 있어 core 버전을 databind에 맞춘다.
+RUN rm -f /opt/scouter/server/lib/jackson-core-*.jar /opt/scouter/webapp/lib/jackson-core-*.jar \
+    && wget https://repo1.maven.org/maven2/com/fasterxml/jackson/core/jackson-core/2.12.6/jackson-core-2.12.6.jar -O /opt/scouter/server/lib/jackson-core-2.12.6.jar \
+    && wget https://repo1.maven.org/maven2/com/fasterxml/jackson/core/jackson-core/2.12.6/jackson-core-2.12.6.jar -O /opt/scouter/webapp/lib/jackson-core-2.12.6.jar
 
 # [Step 2] 호환되는 scouter-paper 2.6.4 zip 패키지 다운로드 및 해제
 RUN wget https://github.com/scouter-contrib/scouter-paper/releases/download/2.6.4/scouter-paper-v2.6.4.zip -O /tmp/paper.zip \

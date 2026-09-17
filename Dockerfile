@@ -1,5 +1,5 @@
 # ---- Runtime stage (맥북 빌드본을 활용하여 가볍고 빠르게 가동) ----
-FROM eclipse-temurin:21-jre-jammy
+FROM eclipse-temurin:17-jre-jammy
 
 WORKDIR /app
 
