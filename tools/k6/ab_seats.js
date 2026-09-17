@@ -49,7 +49,6 @@ export const options = {
 function nowEpochS() {
   return Date.now() / 1000;
 }
-
 function phase() {
   const start = TEST_START_EPOCH_S > 0 ? TEST_START_EPOCH_S : nowEpochS();
   const elapsed = nowEpochS() - start;
@@ -111,4 +110,3 @@ export default function (data) {
     if (!ok) seatsFailRecover.add(1);
   }
 }
-
