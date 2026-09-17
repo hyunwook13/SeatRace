@@ -143,4 +143,16 @@ public class RedisFacade {
       return stringRedisTemplate.execute(script, List.of(key), token);
     });
   }
+
+  public String evalStringScript(
+      RedisOperationFeature feature,
+      String scriptText,
+      List<String> keys,
+      String... args
+  ) {
+    return execute(feature, "Lua script", null, () -> {
+      DefaultRedisScript<String> script = new DefaultRedisScript<>(scriptText, String.class);
+      return stringRedisTemplate.execute(script, keys, (Object[]) args);
+    });
+  }
 }

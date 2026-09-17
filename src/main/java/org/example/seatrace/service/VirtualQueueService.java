@@ -3,6 +3,7 @@ package org.example.seatrace.service;
 import io.micrometer.core.instrument.Counter;
 import io.micrometer.core.instrument.MeterRegistry;
 import java.time.Duration;
+import java.util.List;
 import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
@@ -27,6 +28,37 @@ public class VirtualQueueService {
   private static final String TOKEN_KEY = "seat-race:queue:token:%s";
   private static final String USER_TOKEN_KEY = "seat-race:queue:user-token:%d:%d";
   private static final RedisOperationFeature REDIS_FEATURE = RedisOperationFeature.QUEUE_ADMISSION;
+  private static final String ENTER_OR_WAIT_SCRIPT = """
+      local activeScore = redis.call('ZSCORE', KEYS[2], ARGV[1])
+      if activeScore then
+        return 'ACTIVE|0|' .. redis.call('ZCARD', KEYS[2]) .. '|' .. redis.call('ZCARD', KEYS[1])
+      end
+      redis.call('ZADD', KEYS[1], 'NX', ARGV[2], ARGV[1])
+      local position = redis.call('ZRANK', KEYS[1], ARGV[1])
+      if position then position = position + 1 else position = -1 end
+      return 'WAIT|' .. position .. '|' .. redis.call('ZCARD', KEYS[2]) .. '|' .. redis.call('ZCARD', KEYS[1])
+      """;
+  private static final String STATUS_SCRIPT = """
+      local activeScore = redis.call('ZSCORE', KEYS[2], ARGV[1])
+      if activeScore then
+        return 'ACTIVE|0|' .. redis.call('ZCARD', KEYS[2]) .. '|' .. redis.call('ZCARD', KEYS[1])
+      end
+      local position = redis.call('ZRANK', KEYS[1], ARGV[1])
+      if position then position = position + 1 else position = -1 end
+      return 'WAIT|' .. position .. '|' .. redis.call('ZCARD', KEYS[2]) .. '|' .. redis.call('ZCARD', KEYS[1])
+      """;
+  private static final String ADVANCE_ONE_SCRIPT = """
+      redis.call('ZREMRANGEBYSCORE', KEYS[2], 0, ARGV[2])
+      if redis.call('ZCARD', KEYS[2]) >= tonumber(ARGV[3]) then return '0' end
+      local head = redis.call('ZRANGE', KEYS[1], 0, 0)
+      if #head == 0 then return '0' end
+      local count = redis.call('INCR', KEYS[3])
+      if count == 1 then redis.call('EXPIRE', KEYS[3], 2) end
+      if count > tonumber(ARGV[4]) then return '0' end
+      redis.call('ZREM', KEYS[1], head[1])
+      redis.call('ZADD', KEYS[2], ARGV[1], head[1])
+      return '1'
+      """;
 
   private final RedisFacade redisFacade;
   private final VirtualQueueProperties virtualQueueProperties;
@@ -43,16 +75,9 @@ public class VirtualQueueService {
     knownEventIds.add(eventId);
 
     try {
-      if (isActive(eventId, userId)) {
-        return admittedResponse(eventId, userId, 0);
-      }
-
-      ensureWaiting(eventId, userId);
-
-      long position = getPosition(eventId, userId);
-      boolean admitted = isActive(eventId, userId);
-      if (admitted) {
-        return admittedResponse(eventId, userId, 0);
+      QueueSnapshot snapshot = enterOrWaitSnapshot(eventId, userId);
+      if (snapshot.active()) {
+        return admittedResponse(eventId, userId, snapshot);
       }
 
       Counter.builder("seatrace.queue.wait.total")
@@ -62,12 +87,12 @@ public class VirtualQueueService {
 
       return QueueEnterResponse.builder()
           .admitted(false)
-          .position(position)
-          .activeCount(getActiveCount(eventId))
-          .waitCount(getWaitCount(eventId))
+          .position(snapshot.position())
+          .activeCount(snapshot.activeCount())
+          .waitCount(snapshot.waitCount())
           .tps(virtualQueueProperties.getTps())
           .activeLimit(virtualQueueProperties.getActiveLimit())
-          .estimatedWaitMillis(estimateWaitMillis(position))
+          .estimatedWaitMillis(estimateWaitMillis(snapshot.position()))
           .admissionToken(null)
           .admissionExpiresAtMillis(0)
           .build();
@@ -95,20 +120,18 @@ public class VirtualQueueService {
     knownEventIds.add(eventId);
 
     try {
-      boolean admitted = isActive(eventId, userId);
-      long position = admitted ? 0 : getPosition(eventId, userId);
-      boolean waiting = !admitted && position >= 0;
-      AdmissionTokenEntry tokenEntry = admitted ? issueAdmissionToken(eventId, userId) : null;
+      QueueSnapshot snapshot = statusSnapshot(eventId, userId);
+      AdmissionTokenEntry tokenEntry = snapshot.active() ? issueAdmissionToken(eventId, userId) : null;
 
       return QueueStatusResponse.builder()
-          .admitted(admitted)
-          .waiting(waiting)
-          .position(position)
-          .activeCount(getActiveCount(eventId))
-          .waitCount(getWaitCount(eventId))
+          .admitted(snapshot.active())
+          .waiting(!snapshot.active() && snapshot.position() >= 0)
+          .position(snapshot.position())
+          .activeCount(snapshot.activeCount())
+          .waitCount(snapshot.waitCount())
           .tps(virtualQueueProperties.getTps())
           .activeLimit(virtualQueueProperties.getActiveLimit())
-          .estimatedWaitMillis(admitted ? 0 : estimateWaitMillis(position))
+          .estimatedWaitMillis(snapshot.active() ? 0 : estimateWaitMillis(snapshot.position()))
           .admissionToken(tokenEntry == null ? null : tokenEntry.token())
           .admissionExpiresAtMillis(tokenEntry == null ? 0 : tokenEntry.expiresAtMillis())
           .build();
@@ -183,7 +206,6 @@ public class VirtualQueueService {
     evictExpiredLocalAdmissions();
     for (Long eventId : knownEventIds) {
       try {
-        cleanupExpiredActive(eventId);
         advanceQueue(eventId);
       } catch (Exception ex) {
         log.warn("VirtualQueue scheduler skipped event due to Redis failure: eventId={}", eventId, ex);
@@ -191,7 +213,7 @@ public class VirtualQueueService {
     }
   }
 
-  private QueueEnterResponse admittedResponse(Long eventId, Long userId, long position) {
+  private QueueEnterResponse admittedResponse(Long eventId, Long userId, QueueSnapshot snapshot) {
     Counter.builder("seatrace.queue.admit.total")
         .description("Total number of admitted users")
         .register(meterRegistry)
@@ -201,9 +223,9 @@ public class VirtualQueueService {
 
     return QueueEnterResponse.builder()
         .admitted(true)
-        .position(position)
-        .activeCount(getActiveCount(eventId))
-        .waitCount(getWaitCount(eventId))
+        .position(snapshot.position())
+        .activeCount(snapshot.activeCount())
+        .waitCount(snapshot.waitCount())
         .tps(virtualQueueProperties.getTps())
         .activeLimit(virtualQueueProperties.getActiveLimit())
         .estimatedWaitMillis(0)
@@ -314,27 +336,11 @@ public class VirtualQueueService {
 
   private void advanceQueue(Long eventId) {
     int maxAdvance = virtualQueueProperties.getMaxAdvancePerCall();
-    int activeLimit = virtualQueueProperties.getActiveLimit();
 
     while (maxAdvance-- > 0) {
-      cleanupExpiredActive(eventId);
-
-      if (getActiveCount(eventId) >= activeLimit) {
+      if (!advanceOne(eventId)) {
         break;
       }
-
-      Set<String> head = redisFacade.zRange(REDIS_FEATURE, waitKey(eventId), 0, 0);
-      if (head == null || head.isEmpty()) {
-        break;
-      }
-
-      if (!gateAllows(eventId)) {
-        break;
-      }
-
-      String member = head.iterator().next();
-      redisFacade.zRemove(REDIS_FEATURE, waitKey(eventId), member);
-      redisFacade.zAdd(REDIS_FEATURE, activeKey(eventId), member, System.currentTimeMillis());
 
       Counter.builder("seatrace.queue.advance.total")
           .description("Total number of users advanced from wait to active")
@@ -343,38 +349,59 @@ public class VirtualQueueService {
     }
   }
 
-  private boolean gateAllows(Long eventId) {
-    long epochSecond = System.currentTimeMillis() / 1000;
-    String key = GATE_KEY.formatted(eventId, epochSecond);
-    Long count = redisFacade.increment(REDIS_FEATURE, key);
-    if (count != null && count == 1L) {
-      redisFacade.expire(REDIS_FEATURE, key, Duration.ofSeconds(2));
-    }
-    return count != null && count <= virtualQueueProperties.getTps();
+  private QueueSnapshot enterOrWaitSnapshot(Long eventId, Long userId) {
+    String result = redisFacade.evalStringScript(
+        REDIS_FEATURE,
+        ENTER_OR_WAIT_SCRIPT,
+        List.of(waitKey(eventId), activeKey(eventId)),
+        userId.toString(),
+        Long.toString(System.currentTimeMillis())
+    );
+    return parseSnapshot(result);
   }
 
-  private void cleanupExpiredActive(Long eventId) {
-    long cutoff = System.currentTimeMillis() - (virtualQueueProperties.getActiveTtlSeconds() * 1000L);
-    redisFacade.zRemoveRangeByScore(REDIS_FEATURE, activeKey(eventId), 0, cutoff);
+  private QueueSnapshot statusSnapshot(Long eventId, Long userId) {
+    String result = redisFacade.evalStringScript(
+        REDIS_FEATURE,
+        STATUS_SCRIPT,
+        List.of(waitKey(eventId), activeKey(eventId)),
+        userId.toString()
+    );
+    return parseSnapshot(result);
+  }
+
+  private boolean advanceOne(Long eventId) {
+    long now = System.currentTimeMillis();
+    String result = redisFacade.evalStringScript(
+        REDIS_FEATURE,
+        ADVANCE_ONE_SCRIPT,
+        List.of(waitKey(eventId), activeKey(eventId), gateKey(eventId, now / 1000)),
+        Long.toString(now),
+        Long.toString(now - (virtualQueueProperties.getActiveTtlSeconds() * 1000L)),
+        Integer.toString(virtualQueueProperties.getActiveLimit()),
+        Integer.toString(virtualQueueProperties.getTps())
+    );
+    return "1".equals(result);
+  }
+
+  private QueueSnapshot parseSnapshot(String result) {
+    if (result == null) {
+      throw new IllegalStateException("Virtual queue script returned no result");
+    }
+    String[] values = result.split("\\|", -1);
+    if (values.length != 4) {
+      throw new IllegalStateException("Virtual queue script returned an invalid result: " + result);
+    }
+    return new QueueSnapshot(
+        "ACTIVE".equals(values[0]),
+        Long.parseLong(values[1]),
+        Long.parseLong(values[2]),
+        Long.parseLong(values[3])
+    );
   }
 
   private boolean isActive(Long eventId, Long userId) {
     return redisFacade.zScore(REDIS_FEATURE, activeKey(eventId), userId.toString()) != null;
-  }
-
-  private long getPosition(Long eventId, Long userId) {
-    Long rank = redisFacade.zRank(REDIS_FEATURE, waitKey(eventId), userId.toString());
-    return rank == null ? -1 : rank + 1;
-  }
-
-  private long getActiveCount(Long eventId) {
-    Long count = redisFacade.zSize(REDIS_FEATURE, activeKey(eventId));
-    return count == null ? 0 : count;
-  }
-
-  private long getWaitCount(Long eventId) {
-    Long count = redisFacade.zSize(REDIS_FEATURE, waitKey(eventId));
-    return count == null ? 0 : count;
   }
 
   private long estimateWaitMillis(long position) {
@@ -401,6 +428,10 @@ public class VirtualQueueService {
 
   private String activeKey(Long eventId) {
     return ACTIVE_KEY.formatted(eventId);
+  }
+
+  private String gateKey(Long eventId, long epochSecond) {
+    return GATE_KEY.formatted(eventId, epochSecond);
   }
 
   private String tokenKey(String token) {
@@ -456,5 +487,8 @@ public class VirtualQueueService {
       Long userId,
       long expiresAtMillis
   ) {
+  }
+
+  private record QueueSnapshot(boolean active, long position, long activeCount, long waitCount) {
   }
 }
