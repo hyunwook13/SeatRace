@@ -46,6 +46,8 @@ reservation:
 redis:
   degraded-mode:
     enabled: ${REDIS_DEGRADED_MODE_ENABLED:false}
+  resilience:
+    circuit-breaker-enabled: ${REDIS_RESILIENCE_CIRCUIT_BREAKER_ENABLED:true}
 
 resilience4j:
   circuitbreaker:
@@ -58,6 +60,22 @@ resilience4j:
         wait-duration-in-open-state: 5s
         permitted-number-of-calls-in-half-open-state: 3
         automatic-transition-from-open-to-half-open-enabled: true
+    instances:
+      seatCache:
+        base-config: redis-dependency
+      queueAdmission:
+        base-config: redis-dependency
+      reservationHold:
+        base-config: redis-dependency
+      holdStream:
+        base-config: redis-dependency
+      reservationLock:
+        base-config: redis-dependency
+  bulkhead:
+    configs:
+      redis-dependency:
+        max-concurrent-calls: 200
+        max-wait-duration: 0
     instances:
       seatCache:
         base-config: redis-dependency
@@ -111,6 +129,7 @@ management:
   metrics:
     tags:
       application: ${spring.application.name}
+      test_case: ${METRICS_TEST_CASE:default}
     distribution:
       percentiles-histogram:
         http.server.requests: true

@@ -5,6 +5,7 @@ import io.micrometer.core.instrument.MeterRegistry;
 import java.time.Duration;
 import java.util.concurrent.atomic.AtomicLong;
 import lombok.extern.slf4j.Slf4j;
+import org.example.seatrace.config.RedisResilienceProperties;
 import org.springframework.stereotype.Component;
 
 @Slf4j
@@ -15,12 +16,18 @@ public class EventSeatRedisCache {
   private static final long DEGRADED_COOLDOWN_MILLIS = 5_000;
 
   private final RedisFacade redisFacade;
+  private final RedisResilienceProperties resilienceProperties;
   private final AtomicLong degradedUntilMillis = new AtomicLong(0);
   private final Counter redisFallbackCounter;
   private final Counter redisBypassCounter;
 
-  public EventSeatRedisCache(RedisFacade redisFacade, MeterRegistry meterRegistry) {
+  public EventSeatRedisCache(
+      RedisFacade redisFacade,
+      RedisResilienceProperties resilienceProperties,
+      MeterRegistry meterRegistry
+  ) {
     this.redisFacade = redisFacade;
+    this.resilienceProperties = resilienceProperties;
     this.redisFallbackCounter = Counter.builder("seatrace.event_seat_cache.redis_fallback")
         .description("Redis seat-cache failures handled by the fallback path")
         .register(meterRegistry);
@@ -69,10 +76,13 @@ public class EventSeatRedisCache {
   }
 
   private boolean isDegraded() {
-    return System.currentTimeMillis() < degradedUntilMillis.get();
+    return resilienceProperties.isCircuitBreakerEnabled()
+        && System.currentTimeMillis() < degradedUntilMillis.get();
   }
 
   private void markDegraded() {
-    degradedUntilMillis.set(System.currentTimeMillis() + DEGRADED_COOLDOWN_MILLIS);
+    if (resilienceProperties.isCircuitBreakerEnabled()) {
+      degradedUntilMillis.set(System.currentTimeMillis() + DEGRADED_COOLDOWN_MILLIS);
+    }
   }
 }
