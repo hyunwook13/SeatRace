@@ -6,6 +6,7 @@ const state = {
   selectedSeatIds: [],
   queue: null,
   queueTokens: {},
+  queueHeartbeatTimers: {},
   holdResult: null,
   payment: {
     visible: false,
@@ -59,6 +60,7 @@ const PAYMENT_CLIENT_KEY_STORAGE = 'seatrace.toss.clientKey';
 const PAYMENT_CUSTOMER_KEY_STORAGE = 'seatrace.toss.customerKey';
 const DEFAULT_TOSS_CLIENT_KEY = 'test_gck_docs_Ovk5rk1EwkEbP0W43n07xlzm';
 const DEFAULT_TOSS_CUSTOMER_KEY = '1PRL2nXo-0HlPu-c1A92b';
+const QUEUE_HEARTBEAT_INTERVAL_MS = 5000;
 let toastTimer = null;
 
 bootstrap();
@@ -87,6 +89,7 @@ function bindEvents() {
   els.renderPaymentWidgetBtn.addEventListener('click', () => renderPaymentWidget());
   els.requestPaymentBtn.addEventListener('click', () => requestPayment());
   els.logoutBtn.addEventListener('click', logout);
+  window.addEventListener('pagehide', () => releaseQueueLease(state.selectedEventId, true));
 }
 
 async function loadEvents() {
@@ -174,9 +177,7 @@ async function enterQueue() {
     return;
   }
 
-  const response = await request(`/api/events/${event.id}/queue/enter`, {
-    method: 'POST',
-  });
+  const response = await enterQueueWithRetry(event.id);
 
   if (!response.ok) {
     if (response.status === 401) {
@@ -198,6 +199,24 @@ async function enterQueue() {
   } else {
     renderResultPanel();
   }
+}
+
+async function enterQueueWithRetry(eventId) {
+  const maxAttempts = 6;
+  const baseDelayMs = 250;
+  let response;
+
+  for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
+    response = await request(`/api/events/${eventId}/queue/enter`, { method: 'POST' });
+    if (response.ok || response.status !== 503 || attempt === maxAttempts - 1) {
+      return response;
+    }
+
+    const jitterMs = Math.floor(Math.random() * 150);
+    await sleep(baseDelayMs * (2 ** attempt) + jitterMs);
+  }
+
+  return response;
 }
 
 async function reserveSelectedSeats() {
@@ -700,6 +719,7 @@ function currentReservationUrl() {
 }
 
 function logout() {
+  releaseQueueLease(state.selectedEventId, true);
   clearAuthState();
   state.token = '';
   state.user = null;
@@ -803,6 +823,61 @@ function rememberQueueToken(eventId, queue) {
     token: queue.admissionToken,
     expiresAt,
   }));
+  startQueueHeartbeat(eventId);
+}
+
+function startQueueHeartbeat(eventId) {
+  if (!eventId || state.queueHeartbeatTimers[eventId] || !getQueueToken(eventId)) {
+    return;
+  }
+  state.queueHeartbeatTimers[eventId] = window.setInterval(
+    () => renewQueueLease(eventId),
+    QUEUE_HEARTBEAT_INTERVAL_MS
+  );
+}
+
+function stopQueueHeartbeat(eventId) {
+  const timer = state.queueHeartbeatTimers[eventId];
+  if (timer) {
+    window.clearInterval(timer);
+  }
+  delete state.queueHeartbeatTimers[eventId];
+}
+
+async function renewQueueLease(eventId) {
+  const token = getQueueToken(eventId);
+  if (!token) {
+    stopQueueHeartbeat(eventId);
+    return;
+  }
+  const response = await request(`/api/events/${eventId}/queue/heartbeat`, {
+    method: 'POST',
+    headers: queueTokenHeaders(eventId),
+  });
+  if (!response.ok) {
+    stopQueueHeartbeat(eventId);
+    delete state.queueTokens[eventId];
+    localStorage.removeItem(queueTokenStorageKey(eventId));
+    return;
+  }
+  const lease = await response.json();
+  rememberQueueToken(eventId, lease);
+}
+
+function releaseQueueLease(eventId, keepalive = false) {
+  const token = eventId ? getQueueToken(eventId) : '';
+  if (!token) {
+    return;
+  }
+  const headers = getAuthHeaders({ 'X-Queue-Token': token });
+  stopQueueHeartbeat(eventId);
+  delete state.queueTokens[eventId];
+  localStorage.removeItem(queueTokenStorageKey(eventId));
+  fetch(`/api/events/${eventId}/queue/active`, {
+    method: 'DELETE',
+    headers,
+    keepalive,
+  });
 }
 
 function getQueueToken(eventId) {

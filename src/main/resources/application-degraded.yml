@@ -1,0 +1,16 @@
+spring:
+  config:
+    activate:
+      on-profile: degraded
+
+# Read-only fallback mode. Redis clients used for coordination are not created.
+redis:
+  degraded-mode:
+    enabled: true
+
+reservation:
+  lock:
+    enabled: false
+
+virtual-queue:
+  enabled: false

@@ -41,6 +41,65 @@ reservation:
     lease-ms: ${RESERVATION_LOCK_LEASE_MS:3000}
     required: ${RESERVATION_LOCK_REQUIRED:false}
 
+# Set REDIS_DEGRADED_MODE_ENABLED=true only with the degraded profile or an
+# equivalent configuration that disables the Redis-backed queue and lock.
+redis:
+  degraded-mode:
+    enabled: ${REDIS_DEGRADED_MODE_ENABLED:false}
+  resilience:
+    circuit-breaker-enabled: ${REDIS_RESILIENCE_CIRCUIT_BREAKER_ENABLED:true}
+
+resilience4j:
+  circuitbreaker:
+    configs:
+      redis-dependency:
+        sliding-window-type: COUNT_BASED
+        sliding-window-size: 10
+        minimum-number-of-calls: 5
+        failure-rate-threshold: 50
+        wait-duration-in-open-state: 5s
+        permitted-number-of-calls-in-half-open-state: 3
+        automatic-transition-from-open-to-half-open-enabled: true
+    instances:
+      seatCache:
+        base-config: redis-dependency
+      queueStatus:
+        base-config: redis-dependency
+      queueEntry:
+        base-config: redis-dependency
+      queueAdvance:
+        base-config: redis-dependency
+      queueLease:
+        base-config: redis-dependency
+      reservationHold:
+        base-config: redis-dependency
+      holdStream:
+        base-config: redis-dependency
+      reservationLock:
+        base-config: redis-dependency
+  bulkhead:
+    configs:
+      redis-dependency:
+        max-concurrent-calls: 200
+        max-wait-duration: 0
+    instances:
+      seatCache:
+        base-config: redis-dependency
+      queueStatus:
+        base-config: redis-dependency
+      queueEntry:
+        base-config: redis-dependency
+      queueAdvance:
+        base-config: redis-dependency
+      queueLease:
+        base-config: redis-dependency
+      reservationHold:
+        base-config: redis-dependency
+      holdStream:
+        base-config: redis-dependency
+      reservationLock:
+        base-config: redis-dependency
+
 virtual-queue:
   enabled: ${VIRTUAL_QUEUE_ENABLED:true}
   tps: ${VIRTUAL_QUEUE_TPS:500}
@@ -48,6 +107,10 @@ virtual-queue:
   active-ttl-seconds: ${VIRTUAL_QUEUE_ACTIVE_TTL_SECONDS:60}
   max-advance-per-call: ${VIRTUAL_QUEUE_MAX_ADVANCE_PER_CALL:50}
   advance-delay-ms: ${VIRTUAL_QUEUE_ADVANCE_DELAY_MS:200}
+queue-redis:
+  # Queue is fail-closed and cannot use the cache client's 100ms fail-fast policy.
+  timeout: ${QUEUE_REDIS_TIMEOUT:300ms}
+  connect-timeout: ${QUEUE_REDIS_CONNECT_TIMEOUT:100ms}
 event-seat:
   cache:
     local-ttl-ms: 300000
@@ -82,6 +145,7 @@ management:
   metrics:
     tags:
       application: ${spring.application.name}
+      test_case: ${METRICS_TEST_CASE:default}
     distribution:
       percentiles-histogram:
         http.server.requests: true

@@ -7,11 +7,9 @@ import java.time.LocalDateTime;
 import java.time.ZoneId;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Map;
 import java.util.Objects;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.dao.InvalidDataAccessApiUsageException;
 import org.springframework.data.domain.Range;
 import org.springframework.data.redis.connection.stream.RecordId;
 import org.springframework.stereotype.Service;
@@ -23,8 +21,33 @@ public class ReservationHoldStreamService {
 
   private static final String STREAM_KEY = "seat-race:reservation:hold:expire-stream";
   private static final String STREAM_LAST_ID_KEY = "seat-race:reservation:hold:expire-stream:last-id";
+  private static final String STREAM_LAST_GENERATED_ID_KEY =
+      "seat-race:reservation:hold:expire-stream:last-generated-id";
   private static final String MAX_SEQUENCE = "18446744073709551615";
-  private static final int MAX_ADD_RETRY = 5;
+  private static final String ENQUEUE_HOLD_SCRIPT = """
+      local requestedMillis = tonumber(ARGV[1])
+      local lastId = redis.call('GET', KEYS[2])
+      local millis = requestedMillis
+      local sequence = 0
+
+      if lastId then
+        local separator = string.find(lastId, '-')
+        local lastMillis = tonumber(string.sub(lastId, 1, separator - 1))
+        local lastSequence = tonumber(string.sub(lastId, separator + 1))
+        if millis < lastMillis then
+          millis = lastMillis
+          sequence = lastSequence + 1
+        elseif millis == lastMillis then
+          sequence = lastSequence + 1
+        end
+      end
+
+      local recordId = tostring(millis) .. '-' .. tostring(sequence)
+      redis.call('XADD', KEYS[1], recordId,
+          'reservationId', ARGV[2], 'expiresAtMillis', ARGV[1])
+      redis.call('SET', KEYS[2], recordId)
+      return recordId
+      """;
 
   private final RedisFacade redisFacade;
   private final MeterRegistry meterRegistry;
@@ -35,40 +58,26 @@ public class ReservationHoldStreamService {
     }
 
     long expiresAtMillis = expiresAt.atZone(ZoneId.systemDefault()).toInstant().toEpochMilli();
-    Map<String, String> body = Map.of(
-        "reservationId", reservationId.toString(),
-        "expiresAtMillis", String.valueOf(expiresAtMillis)
-    );
-    boolean added = false;
-    long seq = reservationId;
-    Exception lastException = null;
-
-    for (int attempt = 0; attempt < MAX_ADD_RETRY; attempt++) {
-      try {
-        redisFacade.xAdd(STREAM_KEY, expiresAtMillis + "-" + seq, body);
-        added = true;
-        Counter.builder("seatrace.hold.stream.enqueued.total")
-            .description("Total number of hold expiration entries enqueued to Redis Stream")
-            .register(meterRegistry)
-            .increment();
-        break;
-      } catch (InvalidDataAccessApiUsageException ex) {
-        seq++;
-        lastException = ex;
-      } catch (Exception ex) {
-        lastException = ex;
-        break;
-      }
-    }
-
-    if (!added) {
+    try {
+      redisFacade.evalStringScript(
+          RedisOperationFeature.HOLD_STREAM,
+          ENQUEUE_HOLD_SCRIPT,
+          List.of(STREAM_KEY, STREAM_LAST_GENERATED_ID_KEY),
+          String.valueOf(expiresAtMillis),
+          reservationId.toString()
+      );
+      Counter.builder("seatrace.hold.stream.enqueued.total")
+          .description("Total number of hold expiration entries enqueued to Redis Stream")
+          .register(meterRegistry)
+          .increment();
+    } catch (Exception ex) {
       Counter.builder("seatrace.hold.stream.enqueue.fail.total")
           .description("Failed to enqueue hold expiration entry to Redis Stream")
           .register(meterRegistry)
           .increment();
       // afterCommit best-effort: hold 응답은 이미 성공했고, 만료는 스케줄러/Redis TTL 폴백으로 처리된다.
       log.warn("홀드 만료 스트림 enqueue 실패(best-effort): reservationId={}, expiresAtMillis={}",
-          reservationId, expiresAtMillis, lastException);
+          reservationId, expiresAtMillis, ex);
     }
   }
 
@@ -85,7 +94,7 @@ public class ReservationHoldStreamService {
       String maxId = nowMillis + "-" + MAX_SEQUENCE;
 
       Range<String> range = Range.of(Range.Bound.exclusive(lastId), Range.Bound.inclusive(maxId));
-      records = redisFacade.xRange(STREAM_KEY, range, maxCount);
+      records = redisFacade.xRange(RedisOperationFeature.HOLD_STREAM, STREAM_KEY, range, maxCount);
     } catch (Exception ex) {
       log.warn("홀드 만료 스트림 read 실패", ex);
       return HoldExpireBatch.empty();
@@ -130,8 +139,8 @@ public class ReservationHoldStreamService {
 
     RecordId[] ids = batch.recordIds().toArray(new RecordId[0]);
     try {
-      redisFacade.xDel(STREAM_KEY, ids);
-      redisFacade.set(STREAM_LAST_ID_KEY, batch.lastId());
+      redisFacade.xDel(RedisOperationFeature.HOLD_STREAM, STREAM_KEY, ids);
+      redisFacade.set(RedisOperationFeature.HOLD_STREAM, STREAM_LAST_ID_KEY, batch.lastId());
     } catch (Exception ex) {
       log.warn("홀드 만료 스트림 markProcessed 실패: lastId={}", batch.lastId(), ex);
       return;
@@ -145,7 +154,7 @@ public class ReservationHoldStreamService {
 
   private String getLastProcessedId() {
     try {
-      String lastId = redisFacade.get(STREAM_LAST_ID_KEY);
+      String lastId = redisFacade.get(RedisOperationFeature.HOLD_STREAM, STREAM_LAST_ID_KEY);
       return Objects.requireNonNullElse(lastId, "0-0");
     } catch (Exception ex) {
       return "0-0";

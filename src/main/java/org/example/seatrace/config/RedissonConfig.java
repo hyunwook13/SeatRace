@@ -8,12 +8,14 @@ import org.redisson.config.Config;
 import org.redisson.config.SingleServerConfig;
 import org.springframework.boot.autoconfigure.data.redis.RedisProperties;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 
 @Slf4j
 @Configuration
 @EnableConfigurationProperties(ReservationLockProperties.class)
+@ConditionalOnProperty(prefix = "reservation.lock", name = "enabled", havingValue = "true", matchIfMissing = true)
 public class RedissonConfig {
 
   @Bean(destroyMethod = "shutdown")
@@ -45,4 +47,3 @@ public class RedissonConfig {
     return Redisson.create(config);
   }
 }
-
