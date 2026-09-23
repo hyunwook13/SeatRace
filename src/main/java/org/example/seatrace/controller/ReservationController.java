@@ -10,6 +10,7 @@ import io.swagger.v3.oas.annotations.tags.Tag;
 import lombok.RequiredArgsConstructor;
 import org.example.seatrace.dto.error.ApiErrorResponse;
 import org.example.seatrace.dto.queue.QueueEnterResponse;
+import org.example.seatrace.dto.queue.QueueLeaseResponse;
 import org.example.seatrace.dto.queue.QueueStatusResponse;
 import org.example.seatrace.dto.reservation.HoldSeatRequest;
 import org.example.seatrace.dto.reservation.HoldSeatResponse;
@@ -23,6 +24,7 @@ import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RequestMapping;
@@ -89,6 +91,35 @@ public class ReservationController {
     return ResponseEntity.ok(
         virtualQueueService.status(eventId, principal.getUserId())
     );
+  }
+
+  @PostMapping("/events/{eventId}/queue/heartbeat")
+  @Operation(summary = "대기열 활성 토큰 연장", description = "활성 사용자의 대기열 lease를 연장합니다.")
+  public ResponseEntity<?> heartbeatQueue(
+      @PathVariable Long eventId,
+      @AuthenticationPrincipal CustomUserPrincipal principal,
+      @RequestHeader(value = "X-Queue-Token", required = false) String queueToken
+  ) {
+    redisDegradedModeGuard.requireQueueAvailable();
+    QueueLeaseResponse response = virtualQueueService.heartbeat(eventId, principal.getUserId(), queueToken);
+    if (response == null) {
+      return ResponseEntity.status(429).body(virtualQueueService.notAdmittedResponse(eventId));
+    }
+    return ResponseEntity.ok(response);
+  }
+
+  @DeleteMapping("/events/{eventId}/queue/active")
+  @Operation(summary = "대기열 활성 토큰 반납", description = "완료 또는 이탈한 사용자의 활성 자리를 즉시 반납합니다.")
+  public ResponseEntity<?> releaseQueue(
+      @PathVariable Long eventId,
+      @AuthenticationPrincipal CustomUserPrincipal principal,
+      @RequestHeader(value = "X-Queue-Token", required = false) String queueToken
+  ) {
+    redisDegradedModeGuard.requireQueueAvailable();
+    if (!virtualQueueService.release(eventId, principal.getUserId(), queueToken)) {
+      return ResponseEntity.status(429).body(virtualQueueService.notAdmittedResponse(eventId));
+    }
+    return ResponseEntity.noContent().build();
   }
 
   @PostMapping("/reservations/{reservationId}/confirm")

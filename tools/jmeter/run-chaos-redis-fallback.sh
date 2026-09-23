@@ -20,6 +20,10 @@ DURATION="${DURATION:-30s}"
 PROM_WINDOW="${PROM_WINDOW:-30s}"
 APP_REPLICAS="${APP_REPLICAS:-2}"
 WARMUP_REQUESTS="${WARMUP_REQUESTS:-40}"
+# Prometheus needs an initial zero-valued scrape from newly recreated apps;
+# otherwise increase() can miss the first DB fallback in the cold-cache phase.
+COLD_CACHE_SCRAPE_WAIT_SECONDS="${COLD_CACHE_SCRAPE_WAIT_SECONDS:-10}"
+METRICS_TEST_CASE="${METRICS_TEST_CASE:-redis-fallback}"
 PROM_URL="${PROM_URL:-http://localhost:9090}"
 
 prom_query() {
@@ -30,7 +34,8 @@ prom_query() {
 }
 
 snapshot_kpis() {
-  local filter='{job="seatrace-app"}'
+  local filter='{job="seatrace-app",test_case="'"$METRICS_TEST_CASE"'"}'
+  local seat_cache_filter='{job="seatrace-app",test_case="'"$METRICS_TEST_CASE"'",feature="seatCache",reason="'
   printf 'hikari_active_max_%s=%s\n' "$PROM_WINDOW" \
     "$(prom_query "max(max_over_time(hikaricp_connections_active${filter}[$PROM_WINDOW]))")"
   printf 'hikari_pending_max_%s=%s\n' "$PROM_WINDOW" \
@@ -43,6 +48,12 @@ snapshot_kpis() {
     "$(prom_query "sum(increase(seatrace_event_seat_cache_redis_fallback_total${filter}[$PROM_WINDOW]))")"
   printf 'redis_bypass_inc_%s=%s\n' "$PROM_WINDOW" \
     "$(prom_query "sum(increase(seatrace_event_seat_cache_redis_bypass_total${filter}[$PROM_WINDOW]))")"
+  printf 'seat_cache_redis_failure_inc_%s=%s\n' "$PROM_WINDOW" \
+    "$(prom_query "sum(increase(seatrace_redis_resilience_failure_total${seat_cache_filter}redis_failure\"}[$PROM_WINDOW]))")"
+  printf 'seat_cache_bulkhead_rejected_inc_%s=%s\n' "$PROM_WINDOW" \
+    "$(prom_query "sum(increase(seatrace_redis_resilience_failure_total${seat_cache_filter}bulkhead_rejected\"}[$PROM_WINDOW]))")"
+  printf 'seat_cache_circuit_open_inc_%s=%s\n' "$PROM_WINDOW" \
+    "$(prom_query "sum(increase(seatrace_redis_resilience_failure_total${seat_cache_filter}circuit_open\"}[$PROM_WINDOW]))")"
 }
 
 wait_until_ready() {
@@ -113,7 +124,7 @@ trap restore_redis EXIT
 # The queue and distributed lock are disabled so the experiment measures the
 # seat-read cache and its Redis fallback path only.
 echo "== setup: starting ${APP_REPLICAS} app replicas with Redis available =="
-RESERVATION_LOCK_ENABLED=false RESERVATION_LOCK_REQUIRED=false VIRTUAL_QUEUE_ENABLED=false \
+METRICS_TEST_CASE="$METRICS_TEST_CASE" RESERVATION_LOCK_ENABLED=false RESERVATION_LOCK_REQUIRED=false VIRTUAL_QUEUE_ENABLED=false \
   docker compose up -d --build --force-recreate --scale app="$APP_REPLICAS" postgres redis app nginx prometheus >/dev/null
 wait_until_ready
 sleep 6
@@ -132,10 +143,14 @@ echo "Restoring Redis before recreating app instances with empty local caches...
 docker compose up -d --no-deps redis >/dev/null
 sleep 3
 echo "Recreating app instances while Redis is available to clear local caches..."
-RESERVATION_LOCK_ENABLED=false RESERVATION_LOCK_REQUIRED=false VIRTUAL_QUEUE_ENABLED=false \
+METRICS_TEST_CASE="${METRICS_TEST_CASE}-cold"
+METRICS_TEST_CASE="$METRICS_TEST_CASE" RESERVATION_LOCK_ENABLED=false RESERVATION_LOCK_REQUIRED=false VIRTUAL_QUEUE_ENABLED=false \
   docker compose up -d --build --force-recreate --no-deps --scale app="$APP_REPLICAS" app >/dev/null
 wait_until_ready
-sleep 3
+echo "Waiting ${COLD_CACHE_SCRAPE_WAIT_SECONDS}s for Prometheus to scrape cold-cache counters..."
+sleep "$COLD_CACHE_SCRAPE_WAIT_SECONDS"
+echo '[cold-cache baseline]'
+snapshot_kpis
 echo "Injecting fault: stopping Redis before the first cold-cache seat read..."
 docker compose stop redis >/dev/null
 run_phase redis_down_local_cold

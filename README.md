@@ -79,6 +79,20 @@ docker compose up -d postgres redis
 ./gradlew bootRun
 ```
 
+### C. Redis 장애 읽기 전용 모드
+
+`degraded` 프로파일은 Redis 기반 대기열과 분산 락을 만들지 않습니다. Redis가
+없는 상태에서도 좌석 조회의 캐시 폴백 경로를 확인할 수 있지만, 정합성 보호를 위해
+대기열 진입과 예약 변경(홀드, 확정, 취소)은 `503`으로 제한합니다.
+
+```bash
+docker compose stop redis
+SPRING_PROFILES_ACTIVE=degraded docker compose up -d --build --no-deps app
+```
+
+이 모드는 Redis 장애 대응을 검증하기 위한 제한 모드입니다. 일반 운영 모드에서 Redis
+기반 대기열과 분산 락을 활성화한 상태라면 Redis는 필수 의존성입니다.
+
 ## 6) 테스트 실행
 
 ```bash
@@ -123,8 +137,8 @@ curl -X POST http://localhost:8080/login \
 - Swagger UI: `http://localhost:8080/swagger-ui/index.html`
 - OpenAPI JSON: `http://localhost:8080/v3/api-docs`
 - Health 체크: `http://localhost:8080/health`
-- Actuator Health: `http://localhost:8080/actuator/health`
-- Prometheus 메트릭: `http://localhost:8080/actuator/prometheus`
+- Actuator Health와 Prometheus 메트릭은 관리 포트 `50000`에서 노출됩니다.
+- Docker 환경에서는 `http://localhost:9090`의 Prometheus UI로 지표를 조회합니다.
 - Grafana 대시보드: `http://localhost:3000` (기본 계정 `admin/admin`)
 - Scouter collector: `localhost:6100` (Scouter Client에서 접속)
 
@@ -165,10 +179,16 @@ EVENT_ID=1 SEAT_ID=1 RPS=100 DURATION=10s PROM_WINDOW=30s ./tools/run-lock-hikar
 
 # (B) CQRS(조회/쓰기 부하 격리) 비교: 조회 부하 + 쓰기 버스트
 EVENT_ID=1 SEAT_ID_FROM=1 SEAT_ID_TO=100 READ_RPS=500 WRITE_RPS=100 DURATION=30s WRITE_START=10s WRITE_DURATION=10s PROM_WINDOW=30s ./tools/run-cqrs-isolation-compare.sh
+
+# (C) Redis 장애 폴백: 정상, Redis 중단+local cache warm,
+#     앱 재기동으로 local cache를 비운 뒤 Redis 중단 비교
+EVENT_ID=1 READ_RPS=500 DURATION=30s PROM_WINDOW=30s \
+  ./tools/jmeter/run-chaos-redis-fallback.sh 2>&1 | tee tools/log/redis-fallback-$(date +%Y%m%d-%H%M%S).log
 ```
 
 - (A)는 Prometheus의 `hikaricp_connections_*` 지표로 `active/pending/timeout` 피크를 비교합니다.
 - (B)는 k6 요약(`CQRS Isolation Summary`)의 `read_p95`, `write_p95`, `write_ok_rate`와 함께 `seat_db_load_inc_*`(좌석 조회가 DB를 얼마나 때렸는지)까지 같이 확인합니다.
+- (C)는 Redis 중단 중 `read_ok_rate`, `read_p95/p99`, DB 폴백 수, HikariCP 대기와 `redis_fallback_inc_*` 및 `redis_bypass_inc_*`를 함께 기록합니다.
 
 ### Scouter APM 프로파일링
 
@@ -185,6 +205,9 @@ Scouter Paper는 `http://localhost:6188/extweb/index.html`에서 확인합니다
 ```text
 -javaagent:/opt/scouter/agent.java/scouter.agent.jar
 -Duser.timezone=Asia/Seoul
+--add-opens=java.base/java.lang=ALL-UNNAMED
+--add-exports=java.base/sun.net=ALL-UNNAMED
+-Djdk.attach.allowAttachSelf=true
 -Dscouter.config=/opt/scouter/agent.java/scouter.conf
 ```
 
@@ -196,5 +219,7 @@ Scouter Paper는 `http://localhost:6188/extweb/index.html`에서 확인합니다
 - Redis 장애 테스트: Redis timeout이 request thread를 오래 붙잡는지
 - 결제 기능 추가 시: fake payment delay 중 DB connection을 점유하지 않는지
 
+Mac Scouter Client 앱이 실행되지 않으면 `xattr -cr scouter.client.app`을 실행합니다. XLog 테이블 표시가 깨질 때는 `~/.scouter/xlogcolumnfile/`을 삭제한 뒤 Client를 다시 실행합니다.
+
 Scouter agent 설정은 `scouter/agent.java/scouter.conf`에 있습니다. 기본 profile 범위는 controller/service/repository 패키지입니다. Host CPU, memory, disk, network 지표는 `scouter-host`의 Host Agent가 수집합니다.
-기본 버전은 Scouter `2.21.3`이며, `SCOUTER_AGENT_VERSION`, `SCOUTER_SERVER_VERSION`으로 변경할 수 있습니다.
+기본 버전은 Scouter `2.20.0`이며, `SCOUTER_AGENT_VERSION`, `SCOUTER_SERVER_VERSION`으로 변경할 수 있습니다.

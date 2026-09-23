@@ -4,7 +4,7 @@ services:
       context: .
       dockerfile: Dockerfile
       args:
-        SCOUTER_AGENT_VERSION: ${SCOUTER_AGENT_VERSION:-2.21.3}
+        SCOUTER_AGENT_VERSION: ${SCOUTER_AGENT_VERSION:-2.20.0}
     depends_on:
       postgres:
         condition: service_healthy
@@ -29,7 +29,7 @@ services:
       context: .
       dockerfile: Dockerfile.scouter
       args:
-        SCOUTER_SERVER_VERSION: ${SCOUTER_SERVER_VERSION:-2.21.3}
+        SCOUTER_SERVER_VERSION: ${SCOUTER_SERVER_VERSION:-2.20.0}
     container_name: seatrace-scouter
     # ❌ 기존의 platform: linux/amd64 라인을 완전히 과감하게 삭제했습니다!
     # 💡 이렇게 지워두어야 도커가 알아서 개발자님의 M2 Mac(ARM64/v8) 환경을 인식하고 네이티브로 빌드합니다.
@@ -53,7 +53,7 @@ services:
       context: .
       dockerfile: Dockerfile.scouter
       args:
-        SCOUTER_SERVER_VERSION: ${SCOUTER_SERVER_VERSION:-2.21.3}
+        SCOUTER_SERVER_VERSION: ${SCOUTER_SERVER_VERSION:-2.20.0}
     container_name: seatrace-scouter-host
     depends_on:
       scouter:
