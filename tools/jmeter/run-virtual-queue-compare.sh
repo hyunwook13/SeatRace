@@ -17,6 +17,10 @@ QUEUE_ACTIVE_TTL_SECONDS="${QUEUE_ACTIVE_TTL_SECONDS:-15}"
 QUEUE_MAX_ADVANCE_PER_CALL="${QUEUE_MAX_ADVANCE_PER_CALL:-20}"
 ADMISSION_TIMEOUT_SECONDS="${ADMISSION_TIMEOUT_SECONDS:-120}"
 POLL_INTERVAL_SECONDS="${POLL_INTERVAL_SECONDS:-1}"
+ACTIVE_SESSION_SECONDS="${ACTIVE_SESSION_SECONDS:-0}"
+HEARTBEAT_INTERVAL_SECONDS="${HEARTBEAT_INTERVAL_SECONDS:-5}"
+HEARTBEAT_ENABLED="${HEARTBEAT_ENABLED:-false}"
+RELEASE_AFTER_FLOW="${RELEASE_AFTER_FLOW:-false}"
 PROM_URL="${PROM_URL:-http://localhost:9090}"
 PROM_WINDOW="${PROM_WINDOW:-180s}"
 SCRAPE_WAIT_SECONDS="${SCRAPE_WAIT_SECONDS:-10}"
@@ -31,8 +35,9 @@ if (( SEAT_ID_TO - SEAT_ID_FROM + 1 < USER_COUNT * HOLDS_PER_USER )); then
   exit 1
 fi
 
-if ! compgen -G 'build/libs/*.jar' >/dev/null; then
-  echo "ERROR: build/libs JAR not found. Run: JAVA_HOME=\$(/usr/libexec/java_home -v 17) ./gradlew bootJar" >&2
+JAR_FILE="$(find build/libs -maxdepth 1 -type f -name '*.jar' ! -name '*-plain.jar' -print -quit)"
+if [[ -z "$JAR_FILE" ]] || find src/main build.gradle settings.gradle -newer "$JAR_FILE" -print -quit | grep -q .; then
+  echo "ERROR: application JAR is missing or stale. Run: JAVA_HOME=\$(/usr/libexec/java_home -v 17) ./gradlew bootJar" >&2
   exit 1
 fi
 
@@ -128,33 +133,82 @@ SQL
 }
 
 prom_query() {
-  local response
-  if ! response="$(curl -fsS --max-time 5 --get "$PROM_URL/api/v1/query" \
-    --data-urlencode "query=$1")"; then
+  local query="$1"
+  local empty_value="${2:-na}"
+  local response body status value
+
+  if ! response="$(curl -sS --max-time 5 --get "$PROM_URL/api/v1/query" \
+    --data-urlencode "query=$query" \
+    --write-out $'\n%{http_code}')"; then
+    printf 'Prometheus query transport failure: query=%s\n' "$query" >&2
     printf 'na\n'
     return
   fi
 
-  jq -r 'if .status == "success" then (.data.result[0].value[1] // "na") else "na" end' \
-    <<<"$response" 2>/dev/null || printf 'na\n'
+  status="${response##*$'\n'}"
+  body="${response%$'\n'*}"
+  if [[ "$status" != "200" ]]; then
+    printf 'Prometheus query failed: http_status=%s query=%s response=%s\n' \
+      "$status" "$query" "$body" >&2
+    printf 'na\n'
+    return
+  fi
+
+  if ! value="$(jq -r 'if .status == "success" and (.data.result | length) > 0 then .data.result[0].value[1] else empty end' \
+      <<<"$body")"; then
+    printf 'Prometheus query returned invalid JSON: query=%s response=%s\n' "$query" "$body" >&2
+    printf 'na\n'
+    return
+  fi
+
+  if [[ -z "$value" ]]; then
+    printf '%s\n' "$empty_value"
+  else
+    printf '%s\n' "$value"
+  fi
 }
 
 snapshot_kpis() {
   local test_case="$1"
   local filter="{job=\"seatrace-app\",test_case=\"${test_case}\"}"
   local http_5xx_filter="{job=\"seatrace-app\",test_case=\"${test_case}\",status=~\"5..\"}"
+  local queue_features='queueStatus|queueEntry|queueAdvance|queueLease'
+  local redis_failure_filter="{job=\"seatrace-app\",test_case=\"${test_case}\",feature=~\"${queue_features}\",reason=\"redis_failure\"}"
+  local circuit_open_filter="{job=\"seatrace-app\",test_case=\"${test_case}\",feature=~\"${queue_features}\",reason=\"circuit_open\"}"
+  local redis_queue_filter="{job=\"seatrace-app\",test_case=\"${test_case}\",feature=~\"${queue_features}\"}"
+  local redis_queue_lua_filter="{job=\"seatrace-app\",test_case=\"${test_case}\",feature=~\"${queue_features}\",operation=\"Lua script\"}"
+  local redis_queue_get_filter="{job=\"seatrace-app\",test_case=\"${test_case}\",feature=~\"${queue_features}\",operation=\"GET\"}"
+  local heap_filter="{job=\"seatrace-app\",test_case=\"${test_case}\",area=\"heap\"}"
   printf 'hikari_pending_max=%s\n' "$(prom_query "max(max_over_time(hikaricp_connections_pending${filter}[${PROM_WINDOW}]))")"
-  printf 'hikari_timeout_total=%s\n' "$(prom_query "sum(hikaricp_connections_timeout_total${filter})")"
-  printf 'http_5xx_total=%s\n' "$(prom_query "sum(http_server_requests_seconds_count${http_5xx_filter})")"
-  printf 'hold_request_total=%s\n' "$(prom_query "sum(seatrace_hold_request_total${filter})")"
-  printf 'hold_fail_total=%s\n' "$(prom_query "sum(seatrace_hold_fail_total${filter})")"
-  printf 'queue_enter_total=%s\n' "$(prom_query "sum(seatrace_queue_enter_total${filter})")"
-  printf 'queue_advance_total=%s\n' "$(prom_query "sum(seatrace_queue_advance_total${filter})")"
-  printf 'queue_wait_total=%s\n' "$(prom_query "sum(seatrace_queue_wait_total${filter})")"
-  printf 'queue_redis_failures=%s\n' "$(prom_query "sum(seatrace_redis_resilience_failure_total{job=\"seatrace-app\",test_case=\"${test_case}\",feature=\"queueAdmission\",reason=\"redis_failure\"})")"
-  printf 'queue_circuit_open=%s\n' "$(prom_query "sum(seatrace_redis_resilience_failure_total{job=\"seatrace-app\",test_case=\"${test_case}\",feature=\"queueAdmission\",reason=\"circuit_open\"})")"
+  printf 'hikari_timeout_total=%s\n' "$(prom_query "sum(hikaricp_connections_timeout_total${filter}) or vector(0)")"
+  printf 'http_5xx_total=%s\n' "$(prom_query "sum(http_server_requests_seconds_count${http_5xx_filter}) or vector(0)")"
+  printf 'hold_request_total=%s\n' "$(prom_query "sum(seatrace_hold_request_total${filter}) or vector(0)")"
+  printf 'hold_fail_total=%s\n' "$(prom_query "sum(seatrace_hold_fail_total${filter}) or vector(0)")"
+  printf 'queue_enter_total=%s\n' "$(prom_query "sum(seatrace_queue_enter_total${filter}) or vector(0)")"
+  printf 'queue_advance_total=%s\n' "$(prom_query "sum(seatrace_queue_advance_total${filter}) or vector(0)")"
+  printf 'queue_wait_total=%s\n' "$(prom_query "sum(seatrace_queue_wait_total${filter}) or vector(0)")"
+  printf 'queue_redis_failures=%s\n' "$(prom_query "sum(seatrace_redis_resilience_failure_total${redis_failure_filter}) or vector(0)")"
+  printf 'queue_circuit_open=%s\n' "$(prom_query "sum(seatrace_redis_resilience_failure_total${circuit_open_filter}) or vector(0)")"
+  for feature in queueStatus queueEntry queueAdvance queueLease; do
+    local feature_redis_failure_filter="{job=\"seatrace-app\",test_case=\"${test_case}\",feature=\"${feature}\",reason=\"redis_failure\"}"
+    local feature_circuit_open_filter="{job=\"seatrace-app\",test_case=\"${test_case}\",feature=\"${feature}\",reason=\"circuit_open\"}"
+    printf 'queue_%s_redis_failures=%s\n' "$feature" "$(prom_query "sum(seatrace_redis_resilience_failure_total${feature_redis_failure_filter}) or vector(0)")"
+    printf 'queue_%s_circuit_open=%s\n' "$feature" "$(prom_query "sum(seatrace_redis_resilience_failure_total${feature_circuit_open_filter}) or vector(0)")"
+  done
+  printf 'queue_redis_operation_total=%s\n' "$(prom_query "sum(seatrace_redis_operation_seconds_count${redis_queue_filter}) or vector(0)")"
+  printf 'queue_redis_operation_p95_ms=%s\n' "$(prom_query "histogram_quantile(0.95, sum by (le) (increase(seatrace_redis_operation_seconds_bucket${redis_queue_filter}[${PROM_WINDOW}]))) * 1000")"
+  printf 'queue_redis_operation_p99_ms=%s\n' "$(prom_query "histogram_quantile(0.99, sum by (le) (increase(seatrace_redis_operation_seconds_bucket${redis_queue_filter}[${PROM_WINDOW}]))) * 1000")"
+  printf 'queue_redis_operation_max_ms=%s\n' "$(prom_query "max(seatrace_redis_operation_seconds_max${redis_queue_filter}) * 1000")"
+  printf 'queue_lua_operation_total=%s\n' "$(prom_query "sum(seatrace_redis_operation_seconds_count${redis_queue_lua_filter}) or vector(0)")"
+  printf 'queue_lua_operation_p95_ms=%s\n' "$(prom_query "histogram_quantile(0.95, sum by (le) (increase(seatrace_redis_operation_seconds_bucket${redis_queue_lua_filter}[${PROM_WINDOW}]))) * 1000")"
+  printf 'queue_lua_operation_p99_ms=%s\n' "$(prom_query "histogram_quantile(0.99, sum by (le) (increase(seatrace_redis_operation_seconds_bucket${redis_queue_lua_filter}[${PROM_WINDOW}]))) * 1000")"
+  printf 'queue_lua_operation_max_ms=%s\n' "$(prom_query "max(seatrace_redis_operation_seconds_max${redis_queue_lua_filter}) * 1000")"
+  printf 'queue_get_operation_total=%s\n' "$(prom_query "sum(seatrace_redis_operation_seconds_count${redis_queue_get_filter}) or vector(0)")"
+  printf 'queue_get_operation_p99_ms=%s\n' "$(prom_query "histogram_quantile(0.99, sum by (le) (increase(seatrace_redis_operation_seconds_bucket${redis_queue_get_filter}[${PROM_WINDOW}]))) * 1000")"
+  printf 'queue_heartbeat_total=%s\n' "$(prom_query "sum(seatrace_queue_heartbeat_total${filter}) or vector(0)")"
+  printf 'queue_release_total=%s\n' "$(prom_query "sum(seatrace_queue_release_total${filter}) or vector(0)")"
   printf 'process_cpu_max=%s\n' "$(prom_query "max(max_over_time(process_cpu_usage${filter}[${PROM_WINDOW}]))")"
-  printf 'heap_used_max_bytes=%s\n' "$(prom_query "max(max_over_time(jvm_memory_used_bytes{job=\"seatrace-app\",test_case=\"${test_case}\",area=\"heap\"}[${PROM_WINDOW}]))")"
+  printf 'heap_used_max_bytes=%s\n' "$(prom_query "max(max_over_time(jvm_memory_used_bytes${heap_filter}[${PROM_WINDOW}]))")"
 }
 
 run_phase() {
@@ -166,6 +220,9 @@ run_phase() {
   echo "users=${USER_COUNT} reads_per_user=${READS_PER_USER} holds_per_user=${HOLDS_PER_USER} queue_enabled=${queue_enabled}"
 
   docker compose stop app nginx >/dev/null 2>&1 || true
+  # Reset while no app scheduler can mutate the previous phase's reservations.
+  clear_redis_state
+  reset_event_state
   METRICS_TEST_CASE="$test_case" \
   VIRTUAL_QUEUE_ENABLED="$queue_enabled" \
   VIRTUAL_QUEUE_TPS="$QUEUE_TPS" \
@@ -179,8 +236,6 @@ run_phase() {
   docker compose up -d --no-deps nginx prometheus redis >/dev/null
   wait_for_app
   wait_for_prometheus_scrape "$test_case"
-  clear_redis_state
-  reset_event_state
   local phase_started_at
   phase_started_at="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 
@@ -190,6 +245,9 @@ run_phase() {
     -e SEAT_ID_FROM="$SEAT_ID_FROM" -e SEAT_ID_TO="$SEAT_ID_TO" \
     -e READS_PER_USER="$READS_PER_USER" -e HOLDS_PER_USER="$HOLDS_PER_USER" \
     -e ADMISSION_TIMEOUT_SECONDS="$ADMISSION_TIMEOUT_SECONDS" -e POLL_INTERVAL_SECONDS="$POLL_INTERVAL_SECONDS" \
+    -e ACTIVE_SESSION_SECONDS="$ACTIVE_SESSION_SECONDS" \
+    -e HEARTBEAT_INTERVAL_SECONDS="$HEARTBEAT_INTERVAL_SECONDS" \
+    -e HEARTBEAT_ENABLED="$HEARTBEAT_ENABLED" -e RELEASE_AFTER_FLOW="$RELEASE_AFTER_FLOW" \
     k6 run --summary-trend-stats 'avg,p(90),p(95),p(99),min,max' /scripts/virtual_queue_admission.js
 
   echo "waiting ${SCRAPE_WAIT_SECONDS}s for Prometheus scrape"

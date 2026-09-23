@@ -34,6 +34,28 @@ The current controller guards the seat-list and hold APIs. Reservation
 confirmation and cancellation are not part of this benchmark until they also
 enforce the event admission token.
 
+## Lease Lifecycle
+
+An active admission is a lease, not a fixed reservation of capacity. The client
+renews an active lease through `POST /api/events/{eventId}/queue/heartbeat` and
+returns it through `DELETE /api/events/{eventId}/queue/active` when leaving the
+reservation flow. Both operations validate the admission token and update the
+Redis active set and token TTL in one Lua script.
+
+Run two separate comparisons:
+
+1. Queue protection: keep `HEARTBEAT_ENABLED=false` and
+   `RELEASE_AFTER_FLOW=false`, then compare `queue_off` and `queue_on`.
+2. Lease recovery: keep the queue enabled and compare a fixed lease with
+   `RELEASE_AFTER_FLOW=false` against immediate return with
+   `RELEASE_AFTER_FLOW=true`. Compare admission wait p95 and
+   `queue_release_total`.
+
+To verify renewal itself, set `ACTIVE_SESSION_SECONDS` longer than
+`QUEUE_ACTIVE_TTL_SECONDS`. The no-heartbeat run should lose admission before
+its protected request; the heartbeat run should retain it and report a 100%
+`heartbeat_ok_rate`.
+
 ## Run
 
 Create an event with enough seats first. The default test needs 200 seats.

@@ -13,16 +13,31 @@ const READS_PER_USER = Number(__ENV.READS_PER_USER || "3");
 const HOLDS_PER_USER = Number(__ENV.HOLDS_PER_USER || "1");
 const ADMISSION_TIMEOUT_SECONDS = Number(__ENV.ADMISSION_TIMEOUT_SECONDS || "120");
 const POLL_INTERVAL_SECONDS = Number(__ENV.POLL_INTERVAL_SECONDS || "1");
+const ACTIVE_SESSION_SECONDS = Number(__ENV.ACTIVE_SESSION_SECONDS || "0");
+const HEARTBEAT_INTERVAL_SECONDS = Number(__ENV.HEARTBEAT_INTERVAL_SECONDS || "5");
+const HEARTBEAT_ENABLED = (__ENV.HEARTBEAT_ENABLED || "false") === "true";
+const RELEASE_AFTER_FLOW = (__ENV.RELEASE_AFTER_FLOW || "false") === "true";
+const ENTRY_MAX_ATTEMPTS = Number(__ENV.ENTRY_MAX_ATTEMPTS || "6");
+const ENTRY_RETRY_BASE_MS = Number(__ENV.ENTRY_RETRY_BASE_MS || "250");
 
 const admissionWaitMs = new Trend("queue_admission_wait_ms", true);
 const admittedUsers = new Counter("queue_admitted_users_total");
 const waitingResponses = new Counter("queue_waiting_responses_total");
 const admissionRejected = new Counter("queue_admission_rejected_total");
 const admissionTimeouts = new Counter("queue_admission_timeouts_total");
+const entryAttempts = new Counter("queue_entry_attempt_total");
+const entryRetries = new Counter("queue_entry_retry_total");
 const protectedReadLatency = new Trend("queue_protected_read_latency_ms", true);
 const protectedHoldLatency = new Trend("queue_protected_hold_latency_ms", true);
 const protectedReadOk = new Rate("queue_protected_read_ok");
 const protectedHoldOk = new Rate("queue_protected_hold_ok");
+const protectedHoldConflict = new Counter("queue_protected_hold_409_total");
+const protectedHoldQueueRejected = new Counter("queue_protected_hold_429_total");
+const protectedHoldServerError = new Counter("queue_protected_hold_5xx_total");
+const protectedHoldOtherFailure = new Counter("queue_protected_hold_other_failure_total");
+const heartbeatOk = new Rate("queue_heartbeat_ok");
+const heartbeatLatency = new Trend("queue_heartbeat_latency_ms", true);
+const releaseOk = new Rate("queue_release_ok");
 
 const seatCount = SEAT_ID_TO - SEAT_ID_FROM + 1;
 if (seatCount < USER_COUNT * HOLDS_PER_USER) {
@@ -74,14 +89,28 @@ function authHeaders(token, queueToken) {
 function enterAndAwaitAdmission(token) {
   const headers = authHeaders(token, "");
   const startedAt = Date.now();
-  const enter = http.post(`${BASE_URL}/api/events/${EVENT_ID}/queue/enter`, null, {
-    headers,
-    tags: { name: "queue_enter" },
-    timeout: "10s",
-    responseType: "text",
-  });
+  let enter;
+  for (let attempt = 0; attempt < ENTRY_MAX_ATTEMPTS; attempt += 1) {
+    entryAttempts.add(1);
+    enter = http.post(`${BASE_URL}/api/events/${EVENT_ID}/queue/enter`, null, {
+      headers,
+      tags: { name: "queue_enter" },
+      timeout: "10s",
+      responseType: "text",
+    });
+    if (enter.status === 200) break;
 
-  if (enter.status !== 200) {
+    // Only a temporary Redis-unavailable response is safe to retry here.
+    if (enter.status !== 503 || attempt === ENTRY_MAX_ATTEMPTS - 1) {
+      admissionRejected.add(1);
+      return null;
+    }
+    entryRetries.add(1);
+    const jitterMs = (__VU % 10) * 25;
+    sleep((ENTRY_RETRY_BASE_MS * (2 ** attempt) + jitterMs) / 1000);
+  }
+
+  if (!enter || enter.status !== 200) {
     admissionRejected.add(1);
     return null;
   }
@@ -118,6 +147,34 @@ function enterAndAwaitAdmission(token) {
   return null;
 }
 
+function maintainLease(token, queueToken) {
+  const deadline = Date.now() + ACTIVE_SESSION_SECONDS * 1000;
+  while (Date.now() < deadline) {
+    sleep(Math.min(HEARTBEAT_INTERVAL_SECONDS, (deadline - Date.now()) / 1000));
+    if (!HEARTBEAT_ENABLED) continue;
+
+    const response = http.post(`${BASE_URL}/api/events/${EVENT_ID}/queue/heartbeat`, null, {
+      headers: authHeaders(token, queueToken),
+      tags: { name: "queue_heartbeat" },
+      timeout: "10s",
+    });
+    heartbeatLatency.add(response.timings.duration);
+    heartbeatOk.add(response.status === 200);
+    if (response.status !== 200) return false;
+  }
+  return true;
+}
+
+function releaseLease(token, queueToken) {
+  if (!RELEASE_AFTER_FLOW) return;
+  const response = http.del(`${BASE_URL}/api/events/${EVENT_ID}/queue/active`, null, {
+    headers: authHeaders(token, queueToken),
+    tags: { name: "queue_release" },
+    timeout: "10s",
+  });
+  releaseOk.add(response.status === 204);
+}
+
 export function setup() {
   const tokens = [];
   for (let index = 0; index < USER_COUNT; index += 1) {
@@ -131,6 +188,8 @@ export default function (data) {
   const token = data.tokens[userIndex];
   const queueToken = enterAndAwaitAdmission(token);
   if (queueToken === null) return;
+
+  if (!maintainLease(token, queueToken)) return;
 
   const headers = authHeaders(token, queueToken);
   for (let index = 0; index < READS_PER_USER; index += 1) {
@@ -160,8 +219,14 @@ export default function (data) {
     );
     protectedHoldLatency.add(res.timings.duration);
     protectedHoldOk.add(res.status === 200);
+    if (res.status === 409) protectedHoldConflict.add(1);
+    else if (res.status === 429) protectedHoldQueueRejected.add(1);
+    else if (res.status >= 500) protectedHoldServerError.add(1);
+    else if (res.status !== 200) protectedHoldOtherFailure.add(1);
     check(res, { "protected hold is 200": (r) => r.status === 200 });
   }
+
+  releaseLease(token, queueToken);
 }
 
 function metric(data, name, key) {
@@ -177,6 +242,8 @@ export function handleSummary(data) {
   const lines = [
     "Virtual Queue Admission Summary",
     `admitted_users=${text(metric(data, "queue_admitted_users_total", "count"))}`,
+    `entry_attempts=${text(metric(data, "queue_entry_attempt_total", "count"))}`,
+    `entry_retries=${text(metric(data, "queue_entry_retry_total", "count") || 0)}`,
     `waiting_responses=${text(metric(data, "queue_waiting_responses_total", "count"))}`,
     `admission_rejected=${text(metric(data, "queue_admission_rejected_total", "count"))}`,
     `admission_timeouts=${text(metric(data, "queue_admission_timeouts_total", "count"))}`,
@@ -185,6 +252,13 @@ export function handleSummary(data) {
     `protected_read_p95=${text(metric(data, "queue_protected_read_latency_ms", "p(95)"), "ms")}`,
     `protected_hold_ok_rate=${text(metric(data, "queue_protected_hold_ok", "rate") * 100, "%")}`,
     `protected_hold_p95=${text(metric(data, "queue_protected_hold_latency_ms", "p(95)"), "ms")}`,
+    `protected_hold_409=${text(metric(data, "queue_protected_hold_409_total", "count") || 0)}`,
+    `protected_hold_429=${text(metric(data, "queue_protected_hold_429_total", "count") || 0)}`,
+    `protected_hold_5xx=${text(metric(data, "queue_protected_hold_5xx_total", "count") || 0)}`,
+    `protected_hold_other_failure=${text(metric(data, "queue_protected_hold_other_failure_total", "count") || 0)}`,
+    `heartbeat_ok_rate=${text(metric(data, "queue_heartbeat_ok", "rate") * 100, "%")}`,
+    `heartbeat_p95=${text(metric(data, "queue_heartbeat_latency_ms", "p(95)"), "ms")}`,
+    `release_ok_rate=${text(metric(data, "queue_release_ok", "rate") * 100, "%")}`,
   ];
   return { stdout: `${lines.join("\n")}\n` };
 }

@@ -32,7 +32,7 @@ public class RedisResilienceExecutor {
     this.meterRegistry = meterRegistry;
   }
 
-  public <T> T execute(RedisOperationFeature feature, CheckedSupplier<T> supplier) throws Throwable {
+  public <T> T execute(RedisOperationFeature feature, String operation, CheckedSupplier<T> supplier) throws Throwable {
     CircuitBreaker circuitBreaker = circuitBreakerRegistry.circuitBreaker(feature.resilienceName());
     Bulkhead bulkhead = bulkheadRegistry.bulkhead(feature.resilienceName());
     CheckedSupplier<T> decorated = supplier;
@@ -43,21 +43,32 @@ public class RedisResilienceExecutor {
     try {
       return decorated.get();
     } catch (BulkheadFullException ex) {
-      recordFailure(feature, "bulkhead_rejected");
+      recordFailure(feature, operation, "bulkhead_rejected", ex);
       throw ex;
     } catch (CallNotPermittedException ex) {
-      recordFailure(feature, "circuit_open");
+      recordFailure(feature, operation, "circuit_open", ex);
       throw ex;
     } catch (Throwable ex) {
-      recordFailure(feature, "redis_failure");
+      recordFailure(feature, operation, "redis_failure", ex);
       throw ex;
     }
   }
 
-  private void recordFailure(RedisOperationFeature feature, String reason) {
+  public <T> T execute(RedisOperationFeature feature, CheckedSupplier<T> supplier) throws Throwable {
+    return execute(feature, "unspecified", supplier);
+  }
+
+  private void recordFailure(
+      RedisOperationFeature feature,
+      String operation,
+      String reason,
+      Throwable exception
+  ) {
     Counter.builder("seatrace.redis.resilience.failure")
         .tag("feature", feature.resilienceName())
+        .tag("operation", operation)
         .tag("reason", reason)
+        .tag("exception", exception.getClass().getSimpleName())
         .register(meterRegistry)
         .increment();
   }

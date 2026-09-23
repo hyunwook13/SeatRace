@@ -63,7 +63,13 @@ resilience4j:
     instances:
       seatCache:
         base-config: redis-dependency
-      queueAdmission:
+      queueStatus:
+        base-config: redis-dependency
+      queueEntry:
+        base-config: redis-dependency
+      queueAdvance:
+        base-config: redis-dependency
+      queueLease:
         base-config: redis-dependency
       reservationHold:
         base-config: redis-dependency
@@ -79,7 +85,13 @@ resilience4j:
     instances:
       seatCache:
         base-config: redis-dependency
-      queueAdmission:
+      queueStatus:
+        base-config: redis-dependency
+      queueEntry:
+        base-config: redis-dependency
+      queueAdvance:
+        base-config: redis-dependency
+      queueLease:
         base-config: redis-dependency
       reservationHold:
         base-config: redis-dependency
@@ -95,6 +107,10 @@ virtual-queue:
   active-ttl-seconds: ${VIRTUAL_QUEUE_ACTIVE_TTL_SECONDS:60}
   max-advance-per-call: ${VIRTUAL_QUEUE_MAX_ADVANCE_PER_CALL:50}
   advance-delay-ms: ${VIRTUAL_QUEUE_ADVANCE_DELAY_MS:200}
+queue-redis:
+  # Queue is fail-closed and cannot use the cache client's 100ms fail-fast policy.
+  timeout: ${QUEUE_REDIS_TIMEOUT:300ms}
+  connect-timeout: ${QUEUE_REDIS_CONNECT_TIMEOUT:100ms}
 event-seat:
   cache:
     local-ttl-ms: 300000
