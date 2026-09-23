@@ -3,6 +3,64 @@
 SeatRace는 공연/이벤트 좌석 예약을 위한 백엔드 서버입니다.  
 이벤트/좌석 조회, 좌석 홀드(HOLD), 관리자용 공연장/이벤트 관리 API를 제공합니다.
 
+동시 요청이 몰리는 예매 환경을 가정해, 조회 병목과 Redis 장애 전파를 관찰하고
+캐시, 장애 격리, 가상 대기열로 요청 흐름을 제어하는 것을 목표로 합니다.
+
+## Architecture
+
+```mermaid
+flowchart LR
+    Client[Client / k6] --> Nginx[Nginx]
+    Nginx --> App1[Spring Boot App]
+    Nginx --> App2[Spring Boot App]
+    App1 --> Redis[(Redis)]
+    App2 --> Redis
+    App1 --> Postgres[(PostgreSQL)]
+    App2 --> Postgres
+    Prometheus[Prometheus] --> App1
+    Prometheus --> App2
+```
+
+## Problem, Design, Verify
+
+### 1. Seat read pressure
+
+- **Problem**: mixed seat-read and hold traffic concentrated reads on PostgreSQL,
+  increasing HikariCP pending connections.
+- **Design**: Redis seat cache is backed by a short-lived local cache so reads can
+  avoid both repeated database access and unnecessary Redis dependence.
+- **Verify**: under `500 RPS` seat reads and `100 RPS` holds, read p95 improved
+  from `501.87ms` to `34.08ms` and HikariCP pending fell from `189` to `0`.
+
+### 2. Redis failure isolation
+
+- **Problem**: Redis timeouts on the read path could keep request threads waiting
+  long enough to increase database-pool pressure.
+- **Design**: separate Circuit Breakers and Bulkheads by business role. Seat reads
+  bypass Redis through the cache fallback path, while queue and reservation writes
+  fail closed because they require distributed coordination.
+- **Verify**: during a `500 RPS` Redis-failure read test, p95 improved from
+  `1.94s` to `16.03ms` and HikariCP pending fell from `178` to `0`.
+
+### 3. Virtual queue admission
+
+- **Problem**: a simultaneous reservation burst caused database-pool waits and
+  seat-hold conflicts. The first queue implementation also accumulated Redis
+  round trips during enter and status checks.
+- **Design**: Redis ZSETs model waiting and active users. Lua scripts make queue
+  state transitions atomic in one Redis round trip; queue status, entry,
+  advancement, and lease renewal use isolated resilience policies. Heartbeat and
+  release endpoints renew or return active capacity explicitly.
+- **Verify**: in three repeated 200-user reservation bursts, queue-off HikariCP
+  pending reached `95` and hold conflicts had a median of `39`. With admission at
+  `40 users/s` and an active-user limit of `80`, pending remained `0` and median
+  hold conflicts fell to `12` (`69.2%` reduction). The explicit tradeoff was an
+  admission-wait p95 of about `33.5s` for users outside the active capacity.
+
+Detailed experiment assumptions and commands are documented in
+[Redis resilience policy](docs/redis-resilience.md) and
+[virtual queue benchmark](docs/virtual-queue-benchmark.md).
+
 ## 1) 기술 스택
 
 - Java 17

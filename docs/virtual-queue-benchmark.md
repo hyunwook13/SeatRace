@@ -23,8 +23,9 @@ excess reservation traffic into waiting rather than server-side saturation.
 
 - Protected endpoints: `GET /api/events/{eventId}/seats` and
   `POST /api/events/{eventId}/holds`.
-- Each user is assigned a unique seat. Hold failures therefore indicate an
-  application or infrastructure problem, not intentional seat contention.
+- Each VU is assigned a unique seat ID from the prepared event range. The
+  benchmark records `409` hold conflicts separately rather than interpreting
+  them as generic infrastructure failures.
 - Seat cache is enabled in both phases. The comparison is about admission
   control, not cache versus database performance.
 - `queue_on` admits users at `QUEUE_TPS` and keeps at most
@@ -42,10 +43,9 @@ returns it through `DELETE /api/events/{eventId}/queue/active` when leaving the
 reservation flow. Both operations validate the admission token and update the
 Redis active set and token TTL in one Lua script.
 
-Run two separate comparisons:
+Run two separate comparisons when tuning the queue:
 
-1. Queue protection: keep `HEARTBEAT_ENABLED=false` and
-   `RELEASE_AFTER_FLOW=false`, then compare `queue_off` and `queue_on`.
+1. Queue protection: compare `queue_off` and `queue_on` with the same burst.
 2. Lease recovery: keep the queue enabled and compare a fixed lease with
    `RELEASE_AFTER_FLOW=false` against immediate return with
    `RELEASE_AFTER_FLOW=true`. Compare admission wait p95 and
@@ -71,10 +71,17 @@ JAVA_HOME=$(/usr/libexec/java_home -v 17) ./gradlew bootJar
 
 EVENT_ID=<printed_event_id> SEAT_ID_FROM=<printed_first_seat_id> \
 SEAT_ID_TO=<printed_last_seat_id> USER_COUNT=200 \
-QUEUE_TPS=40 QUEUE_ACTIVE_LIMIT=80 QUEUE_ACTIVE_TTL_SECONDS=15 \
+READS_PER_USER=3 HOLDS_PER_USER=1 \
+QUEUE_TPS=40 QUEUE_ACTIVE_LIMIT=80 QUEUE_ACTIVE_TTL_SECONDS=10 \
+ACTIVE_SESSION_SECONDS=15 HEARTBEAT_ENABLED=true \
+HEARTBEAT_INTERVAL_SECONDS=3 RELEASE_AFTER_FLOW=true \
+POLL_INTERVAL_SECONDS=1 ENTRY_MAX_ATTEMPTS=6 ENTRY_RETRY_BASE_MS=250 \
 ./tools/jmeter/run-virtual-queue-compare.sh 2>&1 | \
 tee tools/log/virtual-queue-compare-$(date +%Y%m%d-%H%M%S).log
 ```
+
+Repeat the command three times before using the median result in a portfolio
+claim. The results summarized in the root README use this configuration.
 
 ## Interpret Results
 

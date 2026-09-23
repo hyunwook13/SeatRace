@@ -9,14 +9,17 @@ policy: each business role has a separate Circuit Breaker and Bulkhead.
 | Role | Resilience name | Redis failure policy |
 | --- | --- | --- |
 | Seat cache | `seatCache` | Skip Redis and use the existing local-cache/DB read path. |
-| Queue admission | `queueAdmission` | Reject queue admission and token validation with `503`. |
+| Queue status | `queueStatus` | Return `503` when the queue state cannot be read safely. |
+| Queue entry | `queueEntry` | Reject admission with `503`; clients may retry a temporary failure. |
+| Queue advancement | `queueAdvance` | Stop advancing users rather than corrupting queue state. |
+| Queue lease | `queueLease` | Reject heartbeat, release, and token validation with `503`. |
 | Reservation hold helpers | `reservationHold` | Preserve the existing best-effort hold-key behavior. |
 | Hold expiration stream | `holdStream` | Preserve the existing best-effort stream processing behavior. |
 | Reservation lock | `reservationLock` | Reject the mutation with `503`; never continue after a Redis/Breaker failure. |
 
-The shared Circuit Breaker named `redisCore` must not be reintroduced. A queue
-failure must not open the seat-cache breaker and force unrelated reads to the
-database.
+The shared Circuit Breaker named `redisCore` must not be reintroduced. Queue
+status, entry, advancement, and lease failures are also isolated from one
+another so a burst of entry retries cannot open the advancement breaker.
 
 ## Degraded Profile
 
